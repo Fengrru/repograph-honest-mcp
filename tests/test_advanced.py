@@ -1,0 +1,128 @@
+"""Integration-style tests for MCP tools and cross-file analysis."""
+
+from __future__ import annotations
+
+from pathlib import Path
+
+import pytest
+
+from repograph_honest.mcp.tools import (
+    check_api,
+    check_symbol,
+    explore_call_graph,
+    find_dead_code,
+    index_project,
+    load_package_apis,
+    load_project_deps,
+    scan_file,
+    validate_types,
+)
+
+
+@pytest.fixture
+def sample_project(tmp_path: Path):
+    """Create a tiny project with a few functions and a class."""
+    (tmp_path / "pkg").mkdir()
+    (tmp_path / "pkg" / "__init__.py").write_text("", encoding="utf-8")
+    (tmp_path / "pkg" / "core.py").write_text(
+        "def helper():\n    return 1\n\n"
+        "def main():\n    return helper()\n\n"
+        "class Worker:\n    def work(self):\n        return helper()\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "pkg" / "unused.py").write_text(
+        "def orphan():\n    return 42\n", encoding="utf-8"
+    )
+    return tmp_path
+
+
+def test_index_and_check_symbol(sample_project: Path):
+    res = index_project(str(sample_project), force_rebuild=True)
+    assert res["success"] is True
+    assert res["symbols_indexed"] >= 3
+
+    sym = check_symbol("pkg.core.main")
+    assert sym["defined"] is True
+    assert sym["location"]["file"] == "pkg/core.py"
+
+
+def test_scan_file_undefined_call(sample_project: Path):
+    bad = sample_project / "bad.py"
+    bad.write_text("nonexistent_func()\n", encoding="utf-8")
+    index_project(str(sample_project), force_rebuild=True)
+    res = scan_file(str(bad))
+    assert res["success"] is True
+    assert any(i["name"] == "nonexistent_func" for i in res["issues"])
+
+
+def test_validate_types_catches_none_iteration():
+    res = validate_types("for x in None:\n    pass\n")
+    assert res["success"] is True
+    assert any(i["type"] == "none_iteration" for i in res["issues"])
+
+
+def test_validate_types_catches_bad_builtin_argc():
+    res = validate_types("len()\n")
+    assert res["success"] is True
+    assert any(i["type"] == "arg_count" for i in res["issues"])
+
+
+def test_validate_types_accepts_valid_code():
+    res = validate_types("x = [1, 2, 3]\nprint(len(x))\n")
+    assert res["success"] is True
+    assert res["issues"] == []
+
+
+def test_load_package_apis():
+    count = load_package_apis("math")
+    assert count["success"] is True
+    assert count["api_count"] > 0
+
+
+def test_check_api_known():
+    load_package_apis("math")
+    res = check_api("math.sqrt")
+    assert res["valid"] is True
+
+
+def test_check_api_unknown_suggestion():
+    load_package_apis("math")
+    res = check_api("math.sqrtt")
+    assert res["valid"] is False
+    assert "suggestion" in res
+
+
+def test_explore_call_graph(sample_project: Path):
+    index_project(str(sample_project), force_rebuild=True)
+    res = explore_call_graph("pkg.core.helper")
+    assert res["success"] is True
+    callers = {c["caller"] for c in res["callers"]}
+    assert "main" in callers or "work" in callers or "<module>" in callers
+
+
+def test_find_dead_code(sample_project: Path):
+    index_project(str(sample_project), force_rebuild=True)
+    res = find_dead_code(entrypoints=["pkg.core.main"])
+    assert res["success"] is True
+    dead_names = {d["symbol"] for d in res["dead_symbols"]}
+    assert "pkg.unused.orphan" in dead_names
+    assert "pkg.core.main" not in dead_names
+
+
+def test_load_project_deps(tmp_path: Path):
+    req = tmp_path / "requirements.txt"
+    req.write_text("pytest>=7.0\n# comment\n-r other.txt\n", encoding="utf-8")
+    res = load_project_deps(str(tmp_path))
+    assert res["success"] is True
+    assert "pytest" in res["packages_loaded"]
+
+
+def test_load_project_deps_pyproject(tmp_path: Path):
+    pp = tmp_path / "pyproject.toml"
+    pp.write_text(
+        '[project]\ndependencies = ["pytest>=7.0", "requests==2.28"]\n',
+        encoding="utf-8",
+    )
+    res = load_project_deps(str(tmp_path))
+    assert res["success"] is True
+    assert "pytest" in res["packages_loaded"]

@@ -1,0 +1,776 @@
+"""
+Tool implementations for the RepoGraph-Honest MCP server.
+
+Each function is decorated with @mcp.tool() in server.py. They provide the
+hallucination-detection capabilities exposed to MCP clients:
+  - index_project        : build the project symbol index
+  - load_project_deps    : load dependency APIs from requirements/pyproject
+  - check_symbol         : verify a symbol is defined
+  - check_api            : verify a library API call is correct
+  - execute_code         : run code in a sandbox
+  - scan_file            : scan a file for potential hallucinations
+  - load_package_apis    : load a package's API signatures
+  - get_project_stats    : index statistics
+  - validate_types       : AST-based type checking
+  - find_dead_code       : find potentially unused symbols
+  - find_similar_code    : find similar/duplicate functions
+  - explore_call_graph   : explore callers/callees of a symbol
+  - search_code          : search source code with regex
+"""
+
+from __future__ import annotations
+
+import ast
+import logging
+import re
+import threading
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Optional
+
+from repograph_honest.honest.router import HonestRouter
+from repograph_honest.honest.symbol_index import ProjectIndex, get_project_index
+from repograph_honest.mcp.knowledge_base import APIKnowledgeBase
+from repograph_honest.sandbox import SandboxExecutor
+from repograph_honest.structure.extractor import StructureExtractor
+from repograph_honest.structure.relations import ParseResult
+
+logger = logging.getLogger(__name__)
+
+# ── Global server state ────────────────────────────────────────────────
+_state_lock = threading.RLock()
+_project_index: Optional[ProjectIndex] = None
+_project_root: Optional[Path] = None
+_dep_kb: APIKnowledgeBase = APIKnowledgeBase()
+_router: Optional[HonestRouter] = None
+_sandbox: SandboxExecutor = SandboxExecutor()
+_extractor: StructureExtractor = StructureExtractor()
+
+
+# ── Internal helpers ───────────────────────────────────────────────────
+def _lazy_router() -> Optional[HonestRouter]:
+    global _router
+    with _state_lock:
+        if _router is None:
+            proj = _project_index.symbols if _project_index else {}
+            _router = HonestRouter(
+                project_symbols=proj,
+                dep_symbols=_dep_kb.all_names(),
+                dep_kb=_dep_kb,
+                project_root=_project_root,
+            )
+        return _router
+
+
+def _module_name(p: Path, root: Path) -> str:
+    """Infer a dotted module name from *p* relative to *root*."""
+    try:
+        rel = p.resolve().relative_to(root.resolve())
+    except ValueError:
+        rel = p
+    parts = list(rel.with_suffix("").parts)
+    if parts and parts[0] == "src":
+        parts = parts[1:]
+    if parts and parts[-1] == "__init__":
+        parts.pop()
+    return ".".join(parts)
+
+
+def _with_module_prefix(p: Path, root: Path, res: ParseResult) -> ParseResult:
+    """Return a copy of *res* whose symbol names are prefixed by their module."""
+    module = _module_name(p, root)
+    if not module:
+        return res
+    prefix = module + "."
+
+    def prefixed(d: dict[str, tuple[int, int]]) -> dict[str, tuple[int, int]]:
+        return {prefix + k if not k.startswith(prefix) else k: v for k, v in d.items()}
+
+    return ParseResult(
+        edges=res.edges,
+        func_defs=prefixed(res.func_defs),
+        class_defs=prefixed(res.class_defs),
+        var_defs=prefixed(res.var_defs),
+        imports=res.imports,
+        imported_symbols=res.imported_symbols,
+        exported_symbols={prefix + s if not s.startswith(prefix) else s for s in (res.exported_symbols or set())},
+    )
+
+
+def _parse_results_for(root: Path) -> dict[Path, ParseResult]:
+    """Parse every *.py file under root and return a path -> ParseResult map."""
+    results: dict[Path, ParseResult] = {}
+    for p in root.rglob("*.py"):
+        if p.name.startswith(".") or "__pycache__" in p.parts:
+            continue
+        try:
+            res = _extractor.parse_file(p)
+            results[p] = _with_module_prefix(p, root, res)
+        except Exception:  # noqa: BLE001
+            continue
+    return results
+
+
+def _normalize_code(text: str) -> str:
+    """Normalize code for similarity comparison."""
+    lines = text.splitlines()
+    out: list[str] = []
+    for line in lines:
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        out.append(re.sub(r"\s+", " ", stripped))
+    return "\n".join(out)
+
+
+def _call_name(node: ast.expr) -> Optional[str]:
+    """Return a dotted name for a call target (e.g. ``obj.method``)."""
+    if isinstance(node, ast.Name):
+        return node.id
+    if isinstance(node, ast.Attribute):
+        parts: list[str] = []
+        current: ast.expr = node
+        while isinstance(current, ast.Attribute):
+            parts.append(current.attr)
+            current = current.value
+        if isinstance(current, ast.Name):
+            parts.append(current.id)
+            return ".".join(reversed(parts))
+        return None
+    return None
+
+
+def _call_base(name: str) -> str:
+    """Return the first component of a dotted name."""
+    return name.split(".")[0]
+
+
+@dataclass
+class _CallGraph:
+    """Project-wide definition/reference graph.
+
+    definitions: name -> [(file, line, end_line, kind)]
+    references:  name -> [(file, line, kind, context)]
+                 where *context* is the enclosing function/class name, if any.
+    """
+
+    definitions: dict[str, list[tuple[Path, int, int, str]]] = field(default_factory=dict)
+    references: dict[str, list[tuple[Path, int, str, Optional[str]]]] = field(default_factory=dict)
+
+
+def _build_call_graph(root: Path) -> _CallGraph:
+    """Build a project-wide definition/reference graph from ASTs."""
+    graph = _CallGraph()
+
+    for p, res in _parse_results_for(root).items():
+        # Definitions
+        for name, (start, end) in res.func_defs.items():
+            graph.definitions.setdefault(name, []).append((p, start + 1, end + 1, "function"))
+        for name, (start, end) in res.class_defs.items():
+            graph.definitions.setdefault(name, []).append((p, start + 1, end + 1, "class"))
+        for name, (start, end) in res.var_defs.items():
+            graph.definitions.setdefault(name, []).append((p, start + 1, end + 1, "variable"))
+
+        # Edges from the extractor already capture intra-file refs.
+        for edge in res.edges:
+            if edge.name:
+                graph.references.setdefault(edge.name, []).append(
+                    (p, edge.tgt_start + 1, "reference", None)
+                )
+
+        # AST-level references with enclosing context.
+        try:
+            tree = ast.parse(p.read_text(encoding="utf-8"), filename=str(p))
+        except SyntaxError:
+            continue
+
+        for node in ast.iter_child_nodes(tree):
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                _collect_refs_in(node, p, graph, context=node.name)
+            else:
+                _collect_refs_in(node, p, graph, context=None)
+
+    return graph
+
+
+def _collect_refs_in(
+    node: ast.AST,
+    p: Path,
+    graph: _CallGraph,
+    context: Optional[str],
+) -> None:
+    """Collect call/name references inside *node* and attach *context*."""
+    for child in ast.walk(node):
+        if isinstance(child, ast.Call):
+            name = _call_name(child.func)
+            if name:
+                graph.references.setdefault(name, []).append(
+                    (p, child.lineno, "call", context)
+                )
+        elif isinstance(child, ast.Name):
+            # Skip store contexts (assign targets, etc.)
+            if isinstance(child.ctx, ast.Store):
+                continue
+            graph.references.setdefault(child.id, []).append(
+                (p, child.lineno, "reference", context)
+            )
+        elif isinstance(child, ast.Attribute):
+            if isinstance(child.ctx, ast.Store):
+                continue
+            name = _call_name(child)
+            if name:
+                graph.references.setdefault(name, []).append(
+                    (p, child.lineno, "attribute", context)
+                )
+
+
+# ── Tools ──────────────────────────────────────────────────────────────
+def index_project(root_path: str, force_rebuild: bool = False) -> dict:
+    """Build (or reuse) the symbol index for a project directory."""
+    global _project_index, _router, _project_root
+    root = Path(root_path)
+    if not root.exists():
+        return {"success": False, "error": f"Path does not exist: {root_path}"}
+    resolved = root.resolve()
+    idx = get_project_index(resolved, force_rebuild=force_rebuild)
+    with _state_lock:
+        _project_root = resolved
+        _project_index = idx
+        _router = None
+    return {
+        "success": True,
+        "symbols_indexed": len(idx.symbols),
+        "root": str(resolved),
+        "cached": not force_rebuild,
+    }
+
+
+def load_project_deps(root_path: str) -> dict:
+    """Load dependency APIs declared in requirements.txt / pyproject.toml."""
+    root = Path(root_path)
+    loaded: list[str] = []
+    for candidate in ("requirements.txt", "pyproject.toml"):
+        f = root / candidate
+        if not f.exists():
+            continue
+        pkgs = _parse_requires(f)
+        for pkg in pkgs:
+            try:
+                n = _dep_kb.load_package(pkg)
+                if n:
+                    loaded.append(pkg)
+            except Exception:  # noqa: BLE001
+                logger.debug("Failed to load package %s", pkg)
+    with _state_lock:
+        global _router
+        _router = None
+    return {"success": True, "packages_loaded": loaded, "total_apis": len(_dep_kb.all_names())}
+
+
+def _parse_requires(f: Path) -> list[str]:
+    text = f.read_text(encoding="utf-8")
+    pkgs: list[str] = []
+    if f.name == "requirements.txt":
+        for line in text.splitlines():
+            line = line.strip()
+            if not line or line.startswith("#"):
+                continue
+            # Skip pip options / VCS installs.
+            if line.startswith("-") or line.startswith("http://") or line.startswith("https://"):
+                continue
+            m = re.match(r"^([A-Za-z0-9_.\-]+)", line)
+            if m:
+                pkgs.append(m.group(1))
+    else:  # pyproject.toml
+        pkgs.extend(_parse_pyproject_deps(text))
+    return pkgs
+
+
+def _parse_pyproject_deps(text: str) -> list[str]:
+    """Extract package names from pyproject.toml, preferring TOML parsing."""
+    try:
+        try:
+            import tomllib  # Python 3.11+
+        except ImportError:
+            import tomli as tomllib  # type: ignore[no-redef]
+        data = tomllib.loads(text)
+        deps: list[str] = []
+        for key in ("project.dependencies", "tool.poetry.dependencies"):
+            parts = key.split(".")
+            cur = data
+            for part in parts:
+                cur = cur.get(part, {})
+            if isinstance(cur, list):
+                deps.extend(_strip_version_spec(d) for d in cur if isinstance(d, str))
+        return deps
+    except Exception:  # noqa: BLE001
+        pass
+
+    # Fallback regex for quoted / unquoted declarations.
+    pkgs: list[str] = []
+    for line in text.splitlines():
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        # "name>=1.0" or name = ">=1.0"
+        m = re.match(r'^["\']?([A-Za-z0-9_.\-]+)["\']?\s*(?:[<>=!~^]=?|$|\s)', line)
+        if m:
+            pkgs.append(m.group(1))
+    return pkgs
+
+
+def _strip_version_spec(dep: str) -> str:
+    """Return the package name part of a dependency specifier."""
+    dep = dep.strip()
+    m = re.match(r"^([A-Za-z0-9_.\-]+)", dep)
+    return m.group(1) if m else dep
+
+
+def check_symbol(symbol_name: str, file_path: Optional[str] = None) -> dict:
+    """Check whether a symbol is defined in the project."""
+    with _state_lock:
+        idx = _project_index
+    if idx is None:
+        return {"success": False, "error": "Project not indexed. Call index_project first."}
+    info = idx.symbols.get(symbol_name)
+    return {
+        "success": True,
+        "symbol": symbol_name,
+        "defined": info is not None,
+        "location": {"file": info.file, "line": info.line} if info else None,
+    }
+
+
+def check_api(api_name: str) -> dict:
+    """Verify a library API call is correct (e.g. pd.read_exel -> read_excel)."""
+    if _dep_kb.has(api_name):
+        return {"success": True, "api": api_name, "valid": True}
+
+    base = api_name.split(".")[0]
+    dep_names = _dep_kb.all_names()
+    base_known = _dep_kb.has(base) or any(k.startswith(base + ".") for k in dep_names)
+    if not base_known:
+        if "." not in api_name:
+            return {"success": True, "api": api_name, "valid": False, "reason": "unknown module"}
+        return {"success": True, "api": api_name, "valid": False, "reason": "unknown module"}
+
+    members = [k for k in dep_names if k.startswith(base + ".")]
+    attr_part = api_name.split(".")[-1]
+    exact = [m for m in members if m == api_name]
+    if exact:
+        return {"success": True, "api": api_name, "valid": True}
+
+    close = [m for m in members if m.split(".")[-1] == attr_part]
+    if close:
+        return {
+            "success": True,
+            "api": api_name,
+            "valid": False,
+            "reason": "Attribute not found on module",
+            "suggestion": close[:3],
+        }
+
+    from difflib import get_close_matches
+
+    fuzzy = get_close_matches(api_name, members, n=3, cutoff=0.6)
+    return {
+        "success": True,
+        "api": api_name,
+        "valid": False,
+        "reason": "Attribute not found on module",
+        "suggestion": fuzzy if fuzzy else members[:3],
+    }
+
+
+def execute_code(code: str, prelude: str = "", known_names: Optional[list[str]] = None) -> dict:
+    """Execute code in a sandboxed subprocess and return structured results."""
+    result = _sandbox.execute(code=code, prelude=prelude, known_names=set(known_names or []))
+    return result.to_dict()
+
+
+def scan_file(file_path: str) -> dict:
+    """Scan a file for potential hallucinations: undefined symbols and missing imports."""
+    p = Path(file_path)
+    if not p.exists():
+        return {"success": False, "error": f"File not found: {file_path}"}
+    try:
+        res = _extractor.parse_file(p)
+    except Exception as e:  # noqa: BLE001
+        return {"success": False, "error": str(e)}
+
+    with _state_lock:
+        idx = _project_index
+        dep_names = _dep_kb.all_names()
+
+    defined = set(res.func_defs.keys()) | set(res.class_defs.keys()) | set(res.var_defs.keys())
+    defined |= res.imports
+    if idx is not None:
+        defined |= set(idx.symbols.keys())
+    defined |= dep_names
+    # Common builtins.
+    defined |= {
+        "print", "len", "range", "enumerate", "zip", "map", "filter", "sorted",
+        "sum", "min", "max", "abs", "round", "int", "str", "float", "bool",
+        "list", "dict", "set", "tuple", "type", "isinstance", "hasattr", "getattr",
+        "open", "input", "repr", "vars", "locals", "globals", "dir", "super",
+        "Exception", "ValueError", "TypeError", "KeyError", "IndexError", "AttributeError",
+    }
+
+    try:
+        tree = ast.parse(p.read_text(encoding="utf-8"), filename=str(p))
+    except SyntaxError as e:
+        return {"success": False, "error": f"SyntaxError: {e}"}
+
+    issues: list[dict] = []
+    seen: set[tuple[str, int]] = set()
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        name = _call_name(node.func)
+        if not name:
+            continue
+        base = _call_base(name)
+        if base in defined or name in defined:
+            continue
+        key = (name, node.lineno)
+        if key in seen:
+            continue
+        seen.add(key)
+        issues.append({"type": "undefined_call", "name": name, "line": node.lineno})
+
+    return {"success": True, "file": str(p), "issues": issues, "defined_symbols": len(defined)}
+
+
+def load_package_apis(package_name: str) -> dict:
+    """Load (and cache) API signatures for a specific package."""
+    n = _dep_kb.load_package(package_name)
+    with _state_lock:
+        global _router
+        _router = None
+    return {"success": True, "package": package_name, "api_count": n}
+
+
+def get_project_stats() -> dict:
+    """Return statistics about the current index."""
+    with _state_lock:
+        idx = _project_index
+    if idx is None:
+        return {"success": False, "error": "Project not indexed."}
+    return {
+        "success": True,
+        "symbols": len(idx.symbols),
+        "dependency_apis": len(_dep_kb.all_names()),
+        "indexed": idx is not None,
+    }
+
+
+def validate_types(code: str) -> dict:
+    """Run a lightweight AST-based type check to catch obvious mismatches."""
+    try:
+        tree = ast.parse(code)
+    except SyntaxError as e:
+        return {"success": False, "error": f"SyntaxError: {e}"}
+
+    issues: list[dict] = []
+
+    for node in ast.walk(tree):
+        # 1. None iteration
+        if isinstance(node, (ast.For, ast.AsyncFor, ast.comprehension)):
+            _check_none_iterable(node.iter, issues)
+        if isinstance(node, ast.Compare):
+            for op, comparator in zip(node.ops, node.comparators):
+                if isinstance(op, ast.In):
+                    _check_none_iterable(comparator, issues)
+
+        # 2. Calling a constant literal
+        if isinstance(node, ast.Call):
+            if isinstance(node.func, ast.Constant):
+                issues.append(
+                    {
+                        "type": "non_callable",
+                        "message": "Attempting to call a constant value",
+                        "line": node.lineno,
+                    }
+                )
+
+        # 3. String method on non-string constant
+        if isinstance(node, ast.Attribute):
+            if node.attr in {"upper", "lower", "strip", "split", "join", "startswith", "endswith"}:
+                if isinstance(node.value, ast.Constant) and not isinstance(node.value.value, str):
+                    issues.append(
+                        {
+                            "type": "type_mismatch",
+                            "message": f"'{node.attr}' called on non-string constant",
+                            "line": node.lineno,
+                        }
+                    )
+
+        # 4. Common builtins with wrong argument count
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name):
+            _check_builtin_argc(node, issues)
+
+    return {"success": True, "issues": issues, "note": "AST structural check complete"}
+
+
+def _check_none_iterable(node: ast.expr, issues: list[dict]) -> None:
+    """Flag iterating over a None constant."""
+    if isinstance(node, ast.Constant) and node.value is None:
+        issues.append(
+            {
+                "type": "none_iteration",
+                "message": "Attempting to iterate over None",
+                "line": getattr(node, "lineno", 0),
+            }
+        )
+
+
+def _check_builtin_argc(node: ast.Call, issues: list[dict]) -> None:
+    """Check argument counts for a small set of common builtins."""
+    name = node.func.id
+    args = len(node.args)
+    kwargs = len(node.keywords)
+    rules = {
+        "len": (1, 1),
+        "repr": (1, 1),
+        "str": (0, 1),
+        "int": (0, 2),
+        "float": (0, 1),
+        "bool": (0, 1),
+        "abs": (1, 1),
+        "round": (1, 2),
+        "sum": (1, 2),
+        "min": (1, None),
+        "max": (1, None),
+        "sorted": (1, 3),
+        "enumerate": (1, 2),
+        "zip": (0, None),
+        "map": (2, None),
+        "filter": (2, None),
+    }
+    if name not in rules:
+        return
+    min_args, max_args = rules[name]
+    total = args + (1 if kwargs else 0)
+    if total < min_args:
+        issues.append(
+            {
+                "type": "arg_count",
+                "message": f"'{name}' expects at least {min_args} argument(s)",
+                "line": node.lineno,
+            }
+        )
+    elif max_args is not None and total > max_args:
+        issues.append(
+            {
+                "type": "arg_count",
+                "message": f"'{name}' expects at most {max_args} argument(s)",
+                "line": node.lineno,
+            }
+        )
+
+
+def find_dead_code(
+    entrypoints: Optional[list[str]] = None,
+    ignore_patterns: Optional[list[str]] = None,
+    include_tests: bool = True,
+) -> dict:
+    """Find symbols that appear to be unused in the project."""
+    with _state_lock:
+        root = _project_root
+        idx = _project_index
+    if root is None or idx is None:
+        return {"success": False, "error": "Project not indexed. Call index_project first."}
+
+    ignore_res = [re.compile(p) for p in (ignore_patterns or [])]
+    graph = _build_call_graph(root)
+
+    alive: set[str] = set(entrypoints or [])
+
+    # Symbols referenced anywhere in the project are considered alive.
+    for name in graph.references:
+        if name in graph.definitions:
+            alive.add(name)
+
+    if include_tests:
+        for name, locations in graph.definitions.items():
+            for p, _line, _end, _kind in locations:
+                if "test" in p.parts or p.name.startswith("test_"):
+                    alive.add(name)
+                    break
+
+    # Treat dunder hooks and public __init__ exports as alive.
+    for name in graph.definitions:
+        if name.startswith("__") and name.endswith("__"):
+            alive.add(name)
+
+    dead: list[dict] = []
+    for name, locations in graph.definitions.items():
+        if name in alive:
+            continue
+        filtered = [
+            (str(p), line, kind)
+            for p, line, _end, kind in locations
+            if not any(r.search(str(p)) for r in ignore_res)
+        ]
+        if filtered:
+            dead.append({"symbol": name, "locations": filtered})
+
+    return {"success": True, "dead_symbols": dead, "count": len(dead)}
+
+
+def find_similar_code(threshold: float = 0.85) -> dict:
+    """Find function-level code clones across the project."""
+    with _state_lock:
+        root = _project_root
+    if root is None:
+        return {"success": False, "error": "Project not indexed. Call index_project first."}
+
+    functions: list[tuple[Path, str, str, tuple[int, int]]] = []
+    for p, res in _parse_results_for(root).items():
+        code = p.read_text(encoding="utf-8")
+        for name, (start, end) in res.func_defs.items():
+            lines = code.splitlines()[start : end + 1]
+            body = _normalize_code("\n".join(lines))
+            functions.append((p, name, body, (start + 1, end + 1)))
+
+    from difflib import SequenceMatcher
+
+    pairs: list[dict] = []
+    seen: set[tuple[tuple[str, str], tuple[str, str]]] = set()
+    for i, (p1, n1, b1, r1) in enumerate(functions):
+        for j, (p2, n2, b2, r2) in enumerate(functions):
+            if i >= j:
+                continue
+            if len(b1) < 30 or len(b2) < 30:
+                continue
+            key = tuple(sorted([(str(p1), n1), (str(p2), n2)]))
+            if key in seen:
+                continue
+            ratio = SequenceMatcher(None, b1, b2).ratio()
+            if ratio >= threshold:
+                seen.add(key)
+                pairs.append(
+                    {
+                        "symbol_a": {"file": str(p1), "name": n1, "lines": r1},
+                        "symbol_b": {"file": str(p2), "name": n2, "lines": r2},
+                        "similarity": round(ratio, 3),
+                    }
+                )
+
+    pairs.sort(key=lambda x: x["similarity"], reverse=True)
+    return {"success": True, "pairs": pairs, "count": len(pairs)}
+
+
+def explore_call_graph(symbol_name: str) -> dict:
+    """Explore callers and callees of a symbol across the project."""
+    with _state_lock:
+        root = _project_root
+    if root is None:
+        return {"success": False, "error": "Project not indexed. Call index_project first."}
+
+    graph = _build_call_graph(root)
+
+    definitions = graph.definitions.get(symbol_name, [])
+    short_name = symbol_name.split(".")[-1]
+
+    # Callers: places that reference *symbol_name* (or its short name).
+    callers: list[dict] = []
+    seen_callers: set[tuple[str, int, str]] = set()
+    for ref_name, refs in graph.references.items():
+        if ref_name != symbol_name and ref_name != short_name:
+            continue
+        for p, line, kind, context in refs:
+            key = (str(p), line, context or "")
+            if key in seen_callers:
+                continue
+            seen_callers.add(key)
+            callers.append(
+                {
+                    "caller": context or "<module>",
+                    "file": str(p),
+                    "line": line,
+                    "kind": kind,
+                }
+            )
+
+    # Callees: symbols referenced from inside *symbol_name*'s definitions.
+    callee_names: set[str] = set()
+    for p, line, _end, _kind in definitions:
+        for ref_name, refs in graph.references.items():
+            for rp, rline, rkind, rcontext in refs:
+                if rcontext == symbol_name and rline >= line:
+                    callee_names.add(ref_name)
+
+    callees: list[dict] = []
+    for callee in sorted(callee_names):
+        locations = graph.definitions.get(callee, [])
+        callees.append(
+            {
+                "callee": callee,
+                "defined": [
+                    {"file": str(p), "line": line, "kind": kind}
+                    for p, line, _end, kind in locations
+                ],
+            }
+        )
+
+    return {
+        "success": True,
+        "symbol": symbol_name,
+        "definitions": [
+            {"file": str(p), "line": line, "kind": kind}
+            for p, line, _end, kind in definitions
+        ],
+        "callers": callers,
+        "callees": callees,
+    }
+
+
+def search_code(pattern: str, glob: str = "*.py") -> dict:
+    """Search project source code with a regex pattern."""
+    with _state_lock:
+        root = _project_root
+    if root is None:
+        return {"success": False, "error": "Project not indexed. Call index_project first."}
+
+    try:
+        regex = re.compile(pattern)
+    except re.error as e:
+        return {"success": False, "error": f"Invalid regex: {e}"}
+
+    matches: list[dict] = []
+    for p in root.rglob(glob):
+        if "__pycache__" in p.parts:
+            continue
+        try:
+            text = p.read_text(encoding="utf-8")
+        except Exception:  # noqa: BLE001
+            continue
+        for m in regex.finditer(text):
+            line = text[: m.start()].count("\n") + 1
+            matches.append(
+                {
+                    "file": str(p),
+                    "line": line,
+                    "match": m.group(0)[:200],
+                }
+            )
+
+    return {"success": True, "pattern": pattern, "matches": matches, "count": len(matches)}
+
+
+def choose_tool(query: str) -> dict:
+    """Choose the most appropriate tool for a natural-language query."""
+    choice = HonestRouter.choose_tool(query)
+    return {
+        "success": True,
+        "tool": choice.intent.value,
+        "confidence": round(choice.confidence, 3),
+        "reason": choice.reason,
+    }
+
+
+# alias so server.py can reference the same function under a stable name
+def _healthcheck() -> dict:
+    with _state_lock:
+        return {"status": "ok", "indexed": _project_index is not None}

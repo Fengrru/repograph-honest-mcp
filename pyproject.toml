@@ -1,0 +1,69 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "repograph-honest-mcp"
+version = "0.1.0"
+description = "RepoGraph-Honest: a lightweight MCP server that detects code hallucinations in real time (undefined symbols, wrong API calls, sandbox execution)."
+readme = "README.md"
+requires-python = ">=3.10"
+license = "MIT"
+authors = [{ name = "RepoGraph-Honest Team" }]
+keywords = [
+    "mcp",
+    "model-context-protocol",
+    "hallucination-detection",
+    "code-generation",
+    "static-analysis",
+    "llm",
+]
+classifiers = [
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Software Development :: Code Generators",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Intended Audience :: Developers",
+    "Operating System :: OS Independent",
+]
+
+dependencies = [
+    "mcp>=1.0.0",
+    "tree-sitter>=0.23.0",
+    "tree-sitter-python>=0.23.0",
+    "pyyaml>=6.0",
+    "tomli>=2.0.0; python_version<'3.11'",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "pytest-cov>=4.0",
+    "ruff>=0.5.0",
+]
+
+[project.scripts]
+repograph-honest-mcp = "repograph_honest.mcp.server:main"
+
+[project.urls]
+Homepage = "https://github.com/Fengrru/repograph-honest-mcp"
+Repository = "https://github.com/Fengrru/repograph-honest-mcp"
+Issues = "https://github.com/Fengrru/repograph-honest-mcp/issues"
+
+[tool.setuptools.packages.find]
+include = ["repograph_honest*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+addopts = "-q"
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I"]
+ignore = ["E501"]
