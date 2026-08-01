@@ -18,7 +18,6 @@ import tempfile
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Optional
 
 logger = logging.getLogger(__name__)
 
@@ -50,7 +49,7 @@ class ExecutionResult:
 class SandboxExecutor:
     """Execute Python code snippets in a restricted subprocess."""
 
-    def __init__(self, timeout: int = 10, memory_mb: Optional[int] = None):
+    def __init__(self, timeout: int = 10, memory_mb: int | None = None):
         self.timeout = timeout
         self.memory_mb = memory_mb
 
@@ -58,7 +57,7 @@ class SandboxExecutor:
         self,
         code: str,
         prelude: str = "",
-        known_names: Optional[set[str]] = None,
+        known_names: set[str] | None = None,
     ) -> ExecutionResult:
         """Run *code* in a fresh Python interpreter and return the result."""
         known_names = known_names or set()

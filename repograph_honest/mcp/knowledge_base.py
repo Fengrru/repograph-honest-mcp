@@ -12,7 +12,6 @@ import logging
 import pkgutil
 import threading
 from dataclasses import dataclass
-from typing import Optional
 
 logger = logging.getLogger(__name__)
 
@@ -123,7 +122,7 @@ class APIKnowledgeBase:
         except (TypeError, ValueError):
             return ""
 
-    def get(self, name: str) -> Optional[APISignature]:
+    def get(self, name: str) -> APISignature | None:
         with self._lock:
             return self.apis.get(name)
 

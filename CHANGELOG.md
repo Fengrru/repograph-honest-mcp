@@ -5,32 +5,50 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- Professional README with architecture diagrams and expandable tool reference.
+- PyPI publish workflow (`publish.yml`).
+- Dependabot configuration for automated dependency updates.
+- GitHub issue templates (bug report, feature request) and PR template.
+- Coverage reporting via Codecov in CI.
+- Additional ruff lint rules (B, UP, SIM, TCH).
+
+### Changed
+
+- Enhanced CI matrix to include Python 3.13.
+- Improved `pyproject.toml` with more classifiers and project URLs.
+- Updated `CONTRIBUTING.md` with detailed development setup and PR guidelines.
+
 ## [0.1.0] - 2026-07-31
 
 ### Added
 
 - Initial open-source release of RepoGraph-Honest MCP Server.
-- `index_project` tool: builds a module-qualified project symbol index with
-  content-hash based caching.
-- `load_project_deps` tool: parses `requirements.txt` and `pyproject.toml` to
-  load installed dependency APIs.
-- `check_symbol` and `check_api` tools for verifying project symbols and library
-  API calls, including typo suggestions.
-- `execute_code` sandbox with timeout, optional Unix memory limits, and
-  structured error reporting.
-- `scan_file` AST-based undefined-call detection.
-- `validate_types` lightweight structural checks (None iteration, builtin arg
-  counts, non-callable calls, string-method type mismatches).
-- `find_dead_code` with entrypoints, test handling, and ignore patterns.
-- `find_similar_code` clone detection using sequence similarity.
-- `explore_call_graph` with caller/callee exploration based on AST references.
-- `search_code` regex search across project source files.
-- `choose_tool` natural-language query routing.
-
-### Changed
-
-- Migrated call-graph and file-scan logic from regex to AST for higher accuracy.
-- Symbols are now stored with module-qualified names (e.g. `pkg.core.main`).
+- **Indexing tools**: `index_project`, `load_project_deps`, `load_package_apis`, `get_project_stats`
+  - Build module-qualified project symbol indices with content-hash caching.
+  - Parse `requirements.txt` and `pyproject.toml` to load dependency API signatures.
+- **Verification tools**: `check_symbol`, `check_api`, `validate_types`, `scan_file`
+  - Verify identifiers are defined in the project.
+  - Verify library API calls exist with typo suggestions via `difflib`.
+  - Structural type checks: None iteration, wrong argument counts, non-callable calls.
+  - AST-based undefined-call detection across entire files.
+- **Analysis tools**: `explore_call_graph`, `find_dead_code`, `find_similar_code`, `search_code`
+  - Explore callers and callees of any symbol.
+  - Detect unused symbols with entrypoint support and ignore patterns.
+  - Find function-level code clones via sequence similarity.
+  - Regex search across project source files.
+- **Execution**: `execute_code` sandboxed subprocess with timeout and optional POSIX memory limits.
+- **Routing**: `choose_tool` natural-language query to tool mapping.
+- MCP server with `stdio` and `SSE` transport support.
+- Thread-safe global state protected by `RLock`.
+- Content-hash based index caching in `~/.cache/repograph_honest/`.
+- SQLite serialization support for project indices.
+- 4 example scripts demonstrating library usage.
+- CI pipeline on GitHub Actions (3 OS x 3 Python versions).
+- Pre-commit hooks with ruff linting and formatting.
 
 ### Fixed
 

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from pathlib import Path
+from pathlib import Path  # noqa: TC003
 
 from repograph_honest.honest.router import HonestRouter, ToolIntent
 from repograph_honest.honest.symbol_index import ProjectIndex, get_project_index

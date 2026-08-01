@@ -5,11 +5,13 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "repograph-honest-mcp"
 version = "0.1.0"
-description = "RepoGraph-Honest: a lightweight MCP server that detects code hallucinations in real time (undefined symbols, wrong API calls, sandbox execution)."
+description = "A lightweight MCP server that detects AI code hallucinations in real time — undefined symbols, wrong API calls, dead code, and type mismatches."
 readme = "README.md"
 requires-python = ">=3.10"
 license = "MIT"
-authors = [{ name = "RepoGraph-Honest Team" }]
+authors = [
+    { name = "RepoGraph-Honest Team" },
+]
 keywords = [
     "mcp",
     "model-context-protocol",
@@ -17,16 +19,25 @@ keywords = [
     "code-generation",
     "static-analysis",
     "llm",
+    "ai",
+    "code-analysis",
+    "dead-code",
+    "type-checking",
 ]
 classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
     "Topic :: Software Development :: Code Generators",
+    "Topic :: Software Development :: Quality Assurance",
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
-    "Intended Audience :: Developers",
-    "Operating System :: OS Independent",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Typing :: Typed",
 ]
 
 dependencies = [
@@ -42,6 +53,7 @@ dev = [
     "pytest>=8.0",
     "pytest-cov>=4.0",
     "ruff>=0.5.0",
+    "pre-commit>=3.0",
 ]
 
 [project.scripts]
@@ -49,8 +61,10 @@ repograph-honest-mcp = "repograph_honest.mcp.server:main"
 
 [project.urls]
 Homepage = "https://github.com/Fengrru/repograph-honest-mcp"
+Documentation = "https://github.com/Fengrru/repograph-honest-mcp#readme"
 Repository = "https://github.com/Fengrru/repograph-honest-mcp"
 Issues = "https://github.com/Fengrru/repograph-honest-mcp/issues"
+Changelog = "https://github.com/Fengrru/repograph-honest-mcp/blob/main/CHANGELOG.md"
 
 [tool.setuptools.packages.find]
 include = ["repograph_honest*"]
@@ -58,12 +72,40 @@ include = ["repograph_honest*"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 python_files = ["test_*.py"]
-addopts = "-q"
+addopts = "-q --tb=short"
 
 [tool.ruff]
 line-length = 100
 target-version = "py310"
 
 [tool.ruff.lint]
-select = ["E", "F", "W", "I"]
-ignore = ["E501"]
+select = [
+    "E",    # pycodestyle errors
+    "F",    # pyflakes
+    "W",    # pycodestyle warnings
+    "I",    # isort
+    "B",    # flake8-bugbear
+    "UP",   # pyupgrade
+    "SIM",  # flake8-simplify
+    "TCH",  # flake8-type-checking
+]
+ignore = [
+    "E501",   # line too long (handled by formatter)
+    "B008",   # function call in default argument
+]
+
+[tool.ruff.lint.isort]
+known-first-party = ["repograph_honest"]
+
+[tool.coverage.run]
+source = ["repograph_honest"]
+omit = ["tests/*"]
+
+[tool.coverage.report]
+show_missing = true
+fail_under = 80
+exclude_lines = [
+    "pragma: no cover",
+    "if __name__ == .__main__.",
+    "if TYPE_CHECKING:",
+]

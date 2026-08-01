@@ -26,7 +26,6 @@ import re
 import threading
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Optional
 
 from repograph_honest.honest.router import HonestRouter
 from repograph_honest.honest.symbol_index import ProjectIndex, get_project_index
@@ -39,16 +38,16 @@ logger = logging.getLogger(__name__)
 
 # ── Global server state ────────────────────────────────────────────────
 _state_lock = threading.RLock()
-_project_index: Optional[ProjectIndex] = None
-_project_root: Optional[Path] = None
+_project_index: ProjectIndex | None = None
+_project_root: Path | None = None
 _dep_kb: APIKnowledgeBase = APIKnowledgeBase()
-_router: Optional[HonestRouter] = None
+_router: HonestRouter | None = None
 _sandbox: SandboxExecutor = SandboxExecutor()
 _extractor: StructureExtractor = StructureExtractor()
 
 
 # ── Internal helpers ───────────────────────────────────────────────────
-def _lazy_router() -> Optional[HonestRouter]:
+def _lazy_router() -> HonestRouter | None:
     global _router
     with _state_lock:
         if _router is None:
@@ -123,7 +122,7 @@ def _normalize_code(text: str) -> str:
     return "\n".join(out)
 
 
-def _call_name(node: ast.expr) -> Optional[str]:
+def _call_name(node: ast.expr) -> str | None:
     """Return a dotted name for a call target (e.g. ``obj.method``)."""
     if isinstance(node, ast.Name):
         return node.id
@@ -155,7 +154,7 @@ class _CallGraph:
     """
 
     definitions: dict[str, list[tuple[Path, int, int, str]]] = field(default_factory=dict)
-    references: dict[str, list[tuple[Path, int, str, Optional[str]]]] = field(default_factory=dict)
+    references: dict[str, list[tuple[Path, int, str, str | None]]] = field(default_factory=dict)
 
 
 def _build_call_graph(root: Path) -> _CallGraph:
@@ -197,7 +196,7 @@ def _collect_refs_in(
     node: ast.AST,
     p: Path,
     graph: _CallGraph,
-    context: Optional[str],
+    context: str | None,
 ) -> None:
     """Collect call/name references inside *node* and attach *context*."""
     for child in ast.walk(node):
@@ -326,7 +325,7 @@ def _strip_version_spec(dep: str) -> str:
     return m.group(1) if m else dep
 
 
-def check_symbol(symbol_name: str, file_path: Optional[str] = None) -> dict:
+def check_symbol(symbol_name: str, file_path: str | None = None) -> dict:
     """Check whether a symbol is defined in the project."""
     with _state_lock:
         idx = _project_index
@@ -382,7 +381,7 @@ def check_api(api_name: str) -> dict:
     }
 
 
-def execute_code(code: str, prelude: str = "", known_names: Optional[list[str]] = None) -> dict:
+def execute_code(code: str, prelude: str = "", known_names: list[str] | None = None) -> dict:
     """Execute code in a sandboxed subprocess and return structured results."""
     result = _sandbox.execute(code=code, prelude=prelude, known_names=set(known_names or []))
     return result.to_dict()
@@ -478,13 +477,12 @@ def validate_types(code: str) -> dict:
         if isinstance(node, (ast.For, ast.AsyncFor, ast.comprehension)):
             _check_none_iterable(node.iter, issues)
         if isinstance(node, ast.Compare):
-            for op, comparator in zip(node.ops, node.comparators):
+            for op, comparator in zip(node.ops, node.comparators, strict=True):
                 if isinstance(op, ast.In):
                     _check_none_iterable(comparator, issues)
 
         # 2. Calling a constant literal
-        if isinstance(node, ast.Call):
-            if isinstance(node.func, ast.Constant):
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Constant):
                 issues.append(
                     {
                         "type": "non_callable",
@@ -494,9 +492,12 @@ def validate_types(code: str) -> dict:
                 )
 
         # 3. String method on non-string constant
-        if isinstance(node, ast.Attribute):
-            if node.attr in {"upper", "lower", "strip", "split", "join", "startswith", "endswith"}:
-                if isinstance(node.value, ast.Constant) and not isinstance(node.value.value, str):
+        if (
+            isinstance(node, ast.Attribute)
+            and node.attr in {"upper", "lower", "strip", "split", "join", "startswith", "endswith"}
+            and isinstance(node.value, ast.Constant)
+            and not isinstance(node.value.value, str)
+        ):
                     issues.append(
                         {
                             "type": "type_mismatch",
@@ -570,8 +571,8 @@ def _check_builtin_argc(node: ast.Call, issues: list[dict]) -> None:
 
 
 def find_dead_code(
-    entrypoints: Optional[list[str]] = None,
-    ignore_patterns: Optional[list[str]] = None,
+    entrypoints: list[str] | None = None,
+    ignore_patterns: list[str] | None = None,
     include_tests: bool = True,
 ) -> dict:
     """Find symbols that appear to be unused in the project."""
@@ -695,9 +696,9 @@ def explore_call_graph(symbol_name: str) -> dict:
 
     # Callees: symbols referenced from inside *symbol_name*'s definitions.
     callee_names: set[str] = set()
-    for p, line, _end, _kind in definitions:
+    for _p, line, _end, _kind in definitions:
         for ref_name, refs in graph.references.items():
-            for rp, rline, rkind, rcontext in refs:
+            for _rp, rline, _rkind, rcontext in refs:
                 if rcontext == symbol_name and rline >= line:
                     callee_names.add(ref_name)
 

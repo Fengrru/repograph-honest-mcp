@@ -12,7 +12,6 @@ Run with:
 from __future__ import annotations
 
 import logging
-from typing import Optional
 
 from mcp.server.fastmcp import FastMCP
 
@@ -88,7 +87,7 @@ def mcp_check_api(api_name: str) -> dict:
 
 @mcp.tool()
 def mcp_execute_code(
-    code: str, prelude: str = "", known_names: Optional[list[str]] = None
+    code: str, prelude: str = "", known_names: list[str] | None = None
 ) -> dict:
     """Execute code in a sandbox and return stdout/stderr plus structured
     error analysis with fix suggestions.
@@ -140,8 +139,8 @@ def mcp_validate_types(code: str) -> dict:
 
 @mcp.tool()
 def mcp_find_dead_code(
-    entrypoints: Optional[list[str]] = None,
-    ignore_patterns: Optional[list[str]] = None,
+    entrypoints: list[str] | None = None,
+    ignore_patterns: list[str] | None = None,
     include_tests: bool = True,
 ) -> dict:
     """Find symbols that appear to be unused in the indexed project.

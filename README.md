@@ -1,206 +1,248 @@
+<div align="center">
+
 # RepoGraph-Honest MCP Server
 
+**Catch AI code hallucinations before they reach your editor.**
+
 [![CI](https://github.com/Fengrru/repograph-honest-mcp/actions/workflows/ci.yml/badge.svg)](https://github.com/Fengrru/repograph-honest-mcp/actions/workflows/ci.yml)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![Python](https://img.shields.io/badge/python-3.10%2B-blue)](https://www.python.org/)
+[![PyPI version](https://img.shields.io/pypi/v/repograph-honest-mcp)](https://pypi.org/project/repograph-honest-mcp/)
+[![Python versions](https://img.shields.io/pypi/pyversions/repograph-honest-mcp)](https://pypi.org/project/repograph-honest-mcp/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![Downloads](https://img.shields.io/pypi/dm/repograph-honest-mcp)](https://pypi.org/project/repograph-honest-mcp/)
 
-> A lightweight [Model Context Protocol (MCP)](https://modelcontextprotocol.io) server that catches code
-> hallucinations in real time — undefined symbols, wrong library API calls, dead code,
-> and obvious type mismatches — by verifying generated code against your project structure
-> and installed dependencies.
+A lightweight [Model Context Protocol (MCP)](https://modelcontextprotocol.io) server that verifies
+AI-generated code against your actual project structure and installed dependencies — detecting
+undefined symbols, wrong API calls, dead code, and type mismatches in real time.
 
-RepoGraph-Honest is a self-contained extraction of the "honest action routing" idea.
-Instead of trusting a code model blindly, it **checks** the symbols and APIs the model
-emits before they reach your editor.
-
-It is **not** a heavyweight ML system: it needs only `mcp`, `tree-sitter`, and
-`tree-sitter-python` — no `torch` / `transformers`.
+</div>
 
 ---
 
-## Table of contents
+## Why RepoGraph-Honest?
 
-- [Features](#features)
-- [Installation](#installation)
-- [Running the server](#running-the-server)
-- [Connecting to an MCP client](#connecting-to-an-mcp-client)
-- [Tool reference](#tool-reference)
-- [Typical workflow](#typical-workflow)
-- [Architecture](#architecture)
-- [Development](#development)
-- [Sandbox security](#sandbox-security)
-- [Contributing](#contributing)
-- [License](#license)
+AI coding assistants are powerful but unreliable. They hallucinate function names, invent library
+APIs, and produce dead code. **RepoGraph-Honest** acts as a verification layer between the model
+and your editor:
+
+```
+┌─────────────┐     ┌──────────────────┐     ┌─────────────┐
+│  AI Model   │────▶│  RepoGraph-Honest │────▶│   Editor    │
+│  generates  │     │  verifies code    │     │  receives   │
+│  code       │     │  against project  │     │  clean code │
+└─────────────┘     └──────────────────┘     └─────────────┘
+```
+
+- **No heavyweight ML** — pure Python AST analysis, no `torch`/`transformers`
+- **MCP-native** — works with Cursor, Claude Desktop, VS Code, and any MCP client
+- **Fast & cached** — content-hash invalidation, thread-safe global state
+- **14 built-in tools** — from symbol checks to call graph exploration
 
 ---
 
 ## Features
 
-| Capability | Tool | What it does |
-|------------|------|--------------|
-| Project indexing | `index_project` | Builds a symbol index (functions / classes / variables) from a directory; caches results across calls |
-| Dependency APIs | `load_project_deps` | Loads public API signatures from `requirements.txt` / `pyproject.toml` |
-| Symbol check | `check_symbol` | Verifies an identifier is defined in the project |
-| API check | `check_api` | Verifies a library API call is correct (e.g. `pd.read_exel` → suggestions) |
-| Sandbox exec | `execute_code` | Runs code in a subprocess sandbox; returns stdout/stderr + error type |
-| File scan | `scan_file` | Scans a whole file for undefined calls |
-| Package APIs | `load_package_apis` | Loads/caches API signatures for one package |
-| Stats | `get_project_stats` | Index statistics |
-| Type check | `validate_types` | Lightweight AST-based structural checks (None iteration, wrong arg counts, etc.) |
-| Dead code | `find_dead_code` | Finds symbols that appear unused; supports entrypoints and ignore patterns |
-| Similar code | `find_similar_code` | Finds function-level code clones across the project |
-| Call graph | `explore_call_graph` | Explores callers and callees of a symbol |
-| Search | `search_code` | Regex search across project source files |
-| Tool routing | `choose_tool` | Maps a natural-language query to the best tool |
+| Category | Tool | Description |
+|:---------|:-----|:------------|
+| **Indexing** | `index_project` | Build a module-qualified symbol index with content-hash caching |
+| | `load_project_deps` | Parse `requirements.txt` / `pyproject.toml` and load dependency APIs |
+| | `load_package_apis` | Load API signatures for a single package |
+| | `get_project_stats` | Get index statistics |
+| **Verification** | `check_symbol` | Verify an identifier is defined in the project |
+| | `check_api` | Verify a library API call exists (with typo suggestions) |
+| | `validate_types` | Structural checks: None iteration, wrong arg counts, etc. |
+| | `scan_file` | Scan a file for all undefined calls via AST analysis |
+| **Analysis** | `explore_call_graph` | Explore callers and callees of a symbol |
+| | `find_dead_code` | Find unused symbols with entrypoint support |
+| | `find_similar_code` | Detect code clones via sequence similarity |
+| | `search_code` | Regex search across project source files |
+| **Execution** | `execute_code` | Run code in a sandboxed subprocess with timeout |
+| **Routing** | `choose_tool` | Map natural language queries to the best tool |
 
 ---
 
-## Installation
+## Quick Start
+
+### 1. Install
 
 ```bash
-# from source
+pip install repograph-honest-mcp
+```
+
+Or from source:
+
+```bash
 git clone https://github.com/Fengrru/repograph-honest-mcp.git
 cd repograph-honest-mcp
 pip install -e .
-
-# or just the runtime deps
-pip install -r requirements.txt
 ```
 
-Python ≥ 3.10 is required.
+> **Requires** Python >= 3.10
 
----
+### 2. Configure your MCP client
 
-## Running the server
+Add to your client's MCP configuration (e.g. `~/.cursor/mcp.json` for Cursor):
 
-```bash
-# as a module (stdio transport — what MCP clients expect)
-python -m repograph_honest.mcp.server
-
-# via the launcher script
-python scripts/run_mcp_server.py
-
-# HTTP/SSE transport (optional)
-python scripts/run_mcp_server.py --transport sse --host 127.0.0.1 --port 8000
+```json
+{
+  "mcpServers": {
+    "repograph-honest": {
+      "command": "repograph-honest-mcp"
+    }
+  }
+}
 ```
 
----
-
-## Connecting to an MCP client
-
-Add this to your client's MCP configuration (Cursor, Claude Desktop, VS Code, etc.):
+Or run directly with Python:
 
 ```json
 {
   "mcpServers": {
     "repograph-honest": {
       "command": "python",
-      "args": ["-m", "repograph_honest.mcp.server"],
-      "cwd": "/absolute/path/to/repograph-honest-mcp"
+      "args": ["-m", "repograph_honest.mcp.server"]
     }
   }
 }
 ```
 
-After restarting the client, the tools above become available.
+### 3. Use it
+
+After restarting your MCP client, the tools are available. A typical workflow:
+
+```
+1. Index your project      →  index_project("/path/to/project")
+2. Load dependency APIs    →  load_project_deps("/path/to/project")
+3. Verify generated code   →  check_symbol("pkg.core.helper")
+                             check_api("pandas.read_csv")
+                             scan_file("generated.py")
+                             execute_code("print(1 + 1)")
+```
 
 ---
 
-## Tool reference
+## Tool Reference
 
-All tools are exposed by the MCP server. They can also be called directly from Python
-(see [`examples/`](examples/)).
+<details>
+<summary><strong><code>index_project(root_path, force_rebuild=False)</code></strong></summary>
 
-### `index_project(root_path: str, force_rebuild: bool = False) -> dict`
-
-Build (or reuse) the project symbol index.
+Build or reuse the project symbol index. Returns indexed symbol count, root path, and cache status.
 
 ```python
 index_project("/path/to/project")
-# => {"success": True, "symbols_indexed": 42, "root": "...", "cached": False}
+# {"success": true, "symbols_indexed": 42, "root": "/path/to/project", "cached": false}
 ```
 
-### `load_project_deps(root_path: str) -> dict`
+</details>
 
-Parse `requirements.txt` or `pyproject.toml` and load the public API signatures of
-listed packages.
+<details>
+<summary><strong><code>load_project_deps(root_path)</code></strong></summary>
+
+Parse `requirements.txt` or `pyproject.toml` and load public API signatures of installed packages.
 
 ```python
 load_project_deps("/path/to/project")
-# => {"success": True, "packages_loaded": ["requests", "pytest"], "total_apis": 1204}
+# {"success": true, "packages_loaded": ["requests", "pytest"], "total_apis": 1204}
 ```
 
-### `check_symbol(symbol_name: str, file_path: str | None = None) -> dict`
+</details>
 
-Check whether a symbol is defined in the indexed project.
+<details>
+<summary><strong><code>check_symbol(symbol_name, file_path=None)</code></strong></summary>
 
-Symbols are stored with their full module-qualified name, e.g. `pkg.core.main`.
+Verify a symbol is defined in the indexed project. Symbols use module-qualified names (`pkg.core.main`).
 
 ```python
 check_symbol("pkg.core.main")
-# => {"success": True, "symbol": "pkg.core.main", "defined": True, "location": {...}}
+# {"success": true, "symbol": "pkg.core.main", "defined": true, "location": {...}}
 ```
 
-### `check_api(api_name: str) -> dict`
+</details>
 
-Check whether a library API exists and get suggestions for typos.
+<details>
+<summary><strong><code>check_api(api_name)</code></strong></summary>
+
+Check if a library API exists. Returns fuzzy suggestions for typos.
 
 ```python
-check_api("math.sqrt")   # valid
-check_api("math.sqrtt")  # invalid + suggestions
+check_api("math.sqrt")    # valid
+check_api("math.sqrtt")   # invalid → suggests "math.sqrt"
 ```
 
-### `execute_code(code: str, prelude: str = "", known_names: list[str] | None = None) -> dict`
+</details>
 
-Run code in a fresh subprocess with a temporary working directory and timeout.
+<details>
+<summary><strong><code>execute_code(code, prelude="", known_names=None)</code></strong></summary>
+
+Run code in a sandboxed subprocess with timeout and temp working directory.
 
 ```python
 execute_code("print(1 + 1)")
-# => {"success": True, "output": "2", ...}
+# {"success": true, "output": "2", ...}
 ```
 
-### `scan_file(file_path: str) -> dict`
+</details>
 
-Scan a file for undefined calls using AST analysis.
+<details>
+<summary><strong><code>scan_file(file_path)</code></strong></summary>
+
+AST-based scan for undefined calls in a file.
 
 ```python
 scan_file("/path/to/project/bad.py")
-# => {"success": True, "issues": [{"type": "undefined_call", "name": "...", "line": 7}]}
+# {"success": true, "issues": [{"type": "undefined_call", "name": "...", "line": 7}]}
 ```
 
-### `validate_types(code: str) -> dict`
+</details>
 
-Lightweight structural checks on a code snippet:
+<details>
+<summary><strong><code>validate_types(code)</code></strong></summary>
 
-- iterating over `None`
-- wrong argument counts for common builtins (`len`, `sum`, etc.)
-- calling constant values
-- string methods on non-string constants
+Lightweight structural checks on code snippets:
+- Iterating over `None`
+- Wrong argument counts for common builtins (`len`, `sum`, etc.)
+- Calling constant values
+- String methods on non-string constants
 
 ```python
 validate_types("for x in None:\n    pass")
-# => {"success": True, "issues": [{"type": "none_iteration", ...}]}
+# {"success": true, "issues": [{"type": "none_iteration", ...}]}
 ```
 
-### `find_dead_code(entrypoints: list[str] | None, ignore_patterns: list[str] | None, include_tests: bool = True) -> dict`
+</details>
 
-Find symbols that appear unused. Provide entrypoints to keep known roots alive.
+<details>
+<summary><strong><code>find_dead_code(entrypoints, ignore_patterns, include_tests=True)</code></strong></summary>
+
+Find unused symbols. Provide entrypoints to keep known roots alive.
 
 ```python
 find_dead_code(entrypoints=["pkg.cli.main"])
-# => {"success": True, "dead_symbols": [...], "count": 3}
+# {"success": true, "dead_symbols": [...], "count": 3}
 ```
 
-### `explore_call_graph(symbol_name: str) -> dict`
+</details>
+
+<details>
+<summary><strong><code>find_similar_code(threshold=0.6)</code></strong></summary>
+
+Detect function-level code clones across the project.
+
+</details>
+
+<details>
+<summary><strong><code>explore_call_graph(symbol_name)</code></strong></summary>
 
 Return definitions, callers, and callees of a symbol.
 
 ```python
 explore_call_graph("pkg.core.helper")
-# => {"success": True, "callers": [...], "callees": [...]}
+# {"success": true, "callers": [...], "callees": [...]}
 ```
 
-### `search_code(pattern: str, glob: str = "*.py") -> dict`
+</details>
+
+<details>
+<summary><strong><code>search_code(pattern, glob="*.py")</code></strong></summary>
 
 Regex search across project source files.
 
@@ -208,78 +250,96 @@ Regex search across project source files.
 search_code(r"def \w+_helper")
 ```
 
----
+</details>
 
-## Typical workflow
+<details>
+<summary><strong><code>choose_tool(query)</code></strong></summary>
 
-1. **`index_project`** on your repo root → builds the symbol table (cached).
-2. **`load_project_deps`** → loads dependency APIs.
-3. Ask your coding agent to generate code; before accepting, it can:
-   - `check_symbol("pkg.core.my_helper")` → ensure it really exists,
-   - `check_api("pandas.read_csv")` → confirm the API name,
-   - `execute_code(...)` → actually run the snippet and surface errors,
-   - `find_dead_code()` → detect newly orphaned code.
+Map a natural-language query to the best tool for the job.
+
+</details>
 
 ---
 
 ## Architecture
 
 ```
-repograph-honest-mcp/
-├── repograph_honest/
-│   ├── mcp/            # FastMCP server + tool implementations
-│   │   ├── server.py   # entry point (mcp.run)
-│   │   ├── tools.py    # tool logic
-│   │   └── knowledge_base.py  # installed package API cache
-│   ├── honest/         # honest action routing
-│   │   ├── router.py   # HonestRouter + ToolIntent routing
-│   │   └── symbol_index.py    # project-wide symbol index + cache
-│   ├── structure/      # tree-sitter based extraction
-│   │   ├── extractor.py
-│   │   └── relations.py
-│   └── sandbox/        # sandboxed execution
-├── scripts/
-│   └── run_mcp_server.py
-├── tests/
-├── .github/workflows/  # CI
-│   └── ci.yml
-├── pyproject.toml
-├── requirements.txt
-└── README.md
+repograph_honest/
+├── mcp/                    # MCP server layer
+│   ├── server.py           # FastMCP entry point (stdio/SSE)
+│   ├── tools.py            # 14 tool implementations
+│   └── knowledge_base.py   # Dependency API signature cache
+├── honest/                 # Core hallucination detection
+│   ├── router.py           # NL query → tool routing
+│   └── symbol_index.py     # Project-wide symbol index + caching
+├── structure/              # Code structure extraction
+│   ├── extractor.py        # AST-based parser
+│   └── relations.py        # Edge/relation data structures
+└── sandbox/                # Sandboxed execution
+    └── __init__.py         # Subprocess executor with timeout
 ```
 
-Key design decisions:
+### Key Design Decisions
 
-- **AST-first**: call graphs and file scans use `ast` instead of fragile regex.
-- **Module-qualified symbols**: the index stores `pkg.module.func` so cross-file
-  references are unambiguous.
-- **Lazy loading + caching**: dependency APIs and project indices are cached and
-  invalidated by content hash.
-- **Thread-safe global state**: tool state is protected by a lock so concurrent
-  MCP requests do not race.
+| Decision | Rationale |
+|:---------|:----------|
+| **AST-first** | Call graphs and file scans use `ast` instead of fragile regex |
+| **Module-qualified symbols** | Index stores `pkg.module.func` so cross-file references are unambiguous |
+| **Lazy loading + caching** | Dependency APIs and project indices are cached with content-hash invalidation |
+| **Thread-safe global state** | Tool state protected by `RLock` for concurrent MCP requests |
+| **Subprocess sandbox** | `execute_code` runs in isolation with timeout and optional memory limits |
 
 ---
 
 ## Development
 
 ```bash
+# Clone and install
+git clone https://github.com/Fengrru/repograph-honest-mcp.git
+cd repograph-honest-mcp
+python -m venv .venv
+source .venv/bin/activate  # Windows: .venv\Scripts\activate
 pip install -e ".[dev]"
+
+# Run tests
 pytest
+
+# Lint & format
 ruff check repograph_honest tests scripts
 ruff format repograph_honest tests scripts
+
+# Pre-commit hooks
+pre-commit install
+pre-commit run --all-files
 ```
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for pull-request guidelines.
+See [CONTRIBUTING.md](CONTRIBUTING.md) for pull request guidelines.
 
 ---
 
-## Sandbox security
+## Security
 
-`execute_code` runs in a subprocess with timeout protection, a temporary working
-directory, and optional Unix resource limits. It is safe against accidental infinite
-loops and simple mistakes, but it is **not** a hardened security boundary against
-malicious code. For untrusted code, run inside a container or dedicated virtual
-machine.
+`execute_code` runs in a subprocess with timeout protection and a temporary working directory.
+It catches accidental mistakes but is **not** a hardened security boundary. For untrusted code,
+use a container or dedicated VM.
+
+See [SECURITY.md](SECURITY.md) for vulnerability reporting.
+
+---
+
+## Roadmap
+
+- [ ] TypeScript/JavaScript project support via tree-sitter
+- [ ] VS Code extension with inline diagnostics
+- [ ] GitHub Action for PR-level hallucination checks
+- [ ] Remote dependency API caching (PyPI index)
+- [ ] Configurable rules and ignore patterns
+
+---
+
+## Changelog
+
+See [CHANGELOG.md](CHANGELOG.md) for release history.
 
 ---
 
@@ -289,12 +349,6 @@ Contributions are welcome! Please read [CONTRIBUTING.md](CONTRIBUTING.md) first.
 
 ---
 
-## Changelog
-
-See [CHANGELOG.md](CHANGELOG.md).
-
----
-
 ## License
 
-[MIT](LICENSE)
+[MIT](LICENSE) - Copyright (c) 2026 RepoGraph-Honest Team

@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import ast
 from pathlib import Path
-from typing import Optional
 
 from tree_sitter import Language, Parser
 
@@ -19,7 +18,7 @@ from repograph_honest.structure.relations import ParseResult, StructEdge
 class StructureExtractor:
     """Extract functions, classes, variables, imports and local edges from a Python file."""
 
-    def __init__(self, parser: Optional[Parser] = None):
+    def __init__(self, parser: Parser | None = None):
         if parser is None:
             try:
                 from tree_sitter_python import language as tspython_language
@@ -216,7 +215,7 @@ class StructureExtractor:
                     )
 
     @staticmethod
-    def _attribute_root(node: ast.Attribute) -> Optional[str]:
+    def _attribute_root(node: ast.Attribute) -> str | None:
         """Return the leftmost Name of an attribute chain, if any."""
         current: ast.expr = node.value
         while isinstance(current, ast.Attribute):
@@ -264,7 +263,7 @@ class StructureExtractor:
         return issues
 
     @staticmethod
-    def _call_name(node: ast.expr) -> Optional[str]:
+    def _call_name(node: ast.expr) -> str | None:
         if isinstance(node, ast.Name):
             return node.id
         if isinstance(node, ast.Attribute):

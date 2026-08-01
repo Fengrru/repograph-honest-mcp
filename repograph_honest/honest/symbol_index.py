@@ -13,7 +13,6 @@ import logging
 import os
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Optional
 
 from repograph_honest.structure.extractor import StructureExtractor
 
@@ -69,7 +68,7 @@ class ProjectIndex:
         conn.close()
 
     @classmethod
-    def from_sqlite(cls, db_path: str | Path) -> Optional["ProjectIndex"]:
+    def from_sqlite(cls, db_path: str | Path) -> ProjectIndex | None:
         import sqlite3
 
         p = Path(db_path)
@@ -190,11 +189,11 @@ def _merge(file: Path, root: Path, res, symbols: dict[str, SymbolInfo]) -> None:
         exported = not name.split(".")[-1].startswith("_") if name else True
         symbols[full_name] = SymbolInfo(file=rel, line=line, kind=kind, exported=exported)
 
-    for fn, (s, e) in res.func_defs.items():
+    for fn, (s, _e) in res.func_defs.items():
         _add(fn, s + 1, "function")
-    for cn, (s, e) in res.class_defs.items():
+    for cn, (s, _e) in res.class_defs.items():
         _add(cn, s + 1, "class")
-    for vn, (s, e) in res.var_defs.items():
+    for vn, (s, _e) in res.var_defs.items():
         _add(vn, s + 1, "variable")
 
 
@@ -205,7 +204,7 @@ _index_cache: dict[str, ProjectIndex] = {}
 def get_project_index(
     root: str | Path,
     force_rebuild: bool = False,
-    cache_dir: Optional[str | Path] = None,
+    cache_dir: str | Path | None = None,
 ) -> ProjectIndex:
     """Return (and cache) the project index for *root*."""
     root = Path(root)

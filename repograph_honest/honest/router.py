@@ -10,7 +10,7 @@ import re
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Optional
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from repograph_honest.mcp.knowledge_base import APIKnowledgeBase
@@ -43,8 +43,8 @@ class HonestRouter:
         self,
         project_symbols: dict[str, Any],
         dep_symbols: set[str],
-        dep_kb: Optional[APIKnowledgeBase] = None,
-        project_root: Optional[str | Path] = None,
+        dep_kb: APIKnowledgeBase | None = None,
+        project_root: str | Path | None = None,
     ):
         self.project_symbols = project_symbols
         self.dep_symbols = dep_symbols
@@ -70,7 +70,7 @@ class HonestRouter:
                 return RouteChoice(intent=intent, confidence=0.7, reason=reason)
         return RouteChoice(intent=ToolIntent.UNKNOWN, confidence=0.0, reason="no clear intent")
 
-    def route(self, query: str, file_path: Optional[str] = None) -> dict:
+    def route(self, query: str, file_path: str | None = None) -> dict:
         """Route a query and return a confidence judgement."""
         choice = self.choose_tool(query)
 
@@ -121,7 +121,7 @@ class HonestRouter:
             "suggestions": suggestions,
         }
 
-    def check_call(self, call: str, file_path: Optional[str] = None) -> dict:
+    def check_call(self, call: str, file_path: str | None = None) -> dict:
         """Evaluate a single code snippet / API call for hallucination risk."""
         if "." in call:
             return self._check_api(call)
