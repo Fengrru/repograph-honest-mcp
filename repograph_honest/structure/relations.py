@@ -1,5 +1,7 @@
 """Relation types and shared data structures for structural code analysis."""
 
+from __future__ import annotations
+
 from dataclasses import dataclass
 from enum import Enum
 
