@@ -26,12 +26,14 @@ AI coding assistants hallucinate. They invent function names, fabricate library 
 dead code. **RepoGraph-Honest** acts as a deterministic verification layer between the model and
 your editor — pure AST analysis, no LLM calls, no network requests.
 
-```
-┌─────────────┐     ┌──────────────────┐     ┌─────────────┐
-│  AI Model   │────▶│  RepoGraph-Honest │────▶│   Editor    │
-│  generates  │     │  verifies code    │     │  receives   │
-│  code       │     │  against project  │     │  clean code │
-└─────────────┘     └──────────────────┘     └─────────────┘
+```mermaid
+graph LR
+    A["AI Model<br/>generates code"] -->|sends code| B["RepoGraph-Honest<br/>verifies against project"]
+    B -->|clean code| C["Editor<br/>receives verified code"]
+
+    style A fill:#e1f5fe,stroke:#0288d1
+    style B fill:#c8e6c9,stroke:#388e3c
+    style C fill:#fff3e0,stroke:#f57c00
 ```
 
 ### One tool by default: `scan_file`
@@ -348,19 +350,20 @@ repograph-honest-mcp search "def \w+_helper"
 
 ### Data flow
 
-```
-┌──────────┐    ┌──────────────┐    ┌──────────────┐    ┌────────────┐
-│  MCP     │───▶│  tools.py    │───▶│  extractor   │───▶│  AST parse │
-│  client  │    │  (14 tools)  │    │  (tree-sitter)│   │  (Python)  │
-└──────────┘    └──────┬───────┘    └──────────────┘    └────────────┘
-                       │
-                 ┌─────┴─────┐
-                 │           │
-           ┌─────▼───┐ ┌────▼────────┐
-           │ symbol  │ │ knowledge   │
-           │ index   │ │ base        │
-           │ (cache) │ │ (dep APIs)  │
-           └─────────┘ └─────────────┘
+```mermaid
+graph TD
+    Client["MCP Client"] -->|tool call| Tools["tools.py<br/>(14 tools)"]
+    Tools -->|parse file| Extractor["Extractor<br/>(tree-sitter)"]
+    Extractor --> AST["AST Parse<br/>(Python ast)"]
+    Tools -->|lookup symbol| Index["Symbol Index<br/>(cache)"]
+    Tools -->|check API| KB["Knowledge Base<br/>(dep APIs)"]
+
+    style Client fill:#e1f5fe,stroke:#0288d1
+    style Tools fill:#c8e6c9,stroke:#388e3c
+    style Extractor fill:#fff3e0,stroke:#f57c00
+    style AST fill:#fce4ec,stroke:#c62828
+    style Index fill:#f3e5f5,stroke:#7b1fa2
+    style KB fill:#f3e5f5,stroke:#7b1fa2
 ```
 
 ### Module layout
