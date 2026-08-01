@@ -13,6 +13,9 @@ from pathlib import Path
 from tree_sitter import Language, Parser
 
 from repograph_honest.structure.relations import ParseResult, StructEdge
+from repograph_honest.structure.utils import call_name
+
+__all__ = ["StructureExtractor"]
 
 
 class StructureExtractor:
@@ -235,11 +238,44 @@ class StructureExtractor:
         defined = set(res.func_defs.keys()) | set(res.class_defs.keys()) | set(res.var_defs.keys())
         defined |= res.imports
         defined |= {
-            "print", "len", "range", "enumerate", "zip", "map", "filter", "sorted",
-            "sum", "min", "max", "abs", "round", "int", "str", "float", "bool",
-            "list", "dict", "set", "tuple", "type", "isinstance", "hasattr", "getattr",
-            "open", "input", "repr", "vars", "locals", "globals", "dir", "super",
-            "Exception", "ValueError", "TypeError", "KeyError", "IndexError",
+            "print",
+            "len",
+            "range",
+            "enumerate",
+            "zip",
+            "map",
+            "filter",
+            "sorted",
+            "sum",
+            "min",
+            "max",
+            "abs",
+            "round",
+            "int",
+            "str",
+            "float",
+            "bool",
+            "list",
+            "dict",
+            "set",
+            "tuple",
+            "type",
+            "isinstance",
+            "hasattr",
+            "getattr",
+            "open",
+            "input",
+            "repr",
+            "vars",
+            "locals",
+            "globals",
+            "dir",
+            "super",
+            "Exception",
+            "ValueError",
+            "TypeError",
+            "KeyError",
+            "IndexError",
             "AttributeError",
         }
 
@@ -252,7 +288,7 @@ class StructureExtractor:
         for node in ast.walk(tree):
             if not isinstance(node, ast.Call):
                 continue
-            name = self._call_name(node.func)
+            name = call_name(node.func)
             if not name:
                 continue
             base = name.split(".")[0]
@@ -261,18 +297,3 @@ class StructureExtractor:
             issues.append({"type": "undefined_call", "name": name, "line": node.lineno})
 
         return issues
-
-    @staticmethod
-    def _call_name(node: ast.expr) -> str | None:
-        if isinstance(node, ast.Name):
-            return node.id
-        if isinstance(node, ast.Attribute):
-            parts: list[str] = []
-            current: ast.expr = node
-            while isinstance(current, ast.Attribute):
-                parts.append(current.attr)
-                current = current.value
-            if isinstance(current, ast.Name):
-                parts.append(current.id)
-                return ".".join(reversed(parts))
-        return None

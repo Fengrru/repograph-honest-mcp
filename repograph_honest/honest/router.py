@@ -15,6 +15,8 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from repograph_honest.mcp.knowledge_base import APIKnowledgeBase
 
+__all__ = ["ToolIntent", "RouteChoice", "HonestRouter"]
+
 
 class ToolIntent(Enum):
     INDEX = "index"
@@ -55,13 +57,33 @@ class HonestRouter:
     def choose_tool(query: str) -> RouteChoice:
         q = query.lower()
         patterns: list[tuple[list[str], ToolIntent, str]] = [
-            (["index", "scan project", "build index"], ToolIntent.INDEX, "query asks to index project"),
-            (["symbol", "defined", "function exists"], ToolIntent.CHECK_SYMBOL, "query checks a symbol"),
-            (["api", "library", "pandas", "numpy"], ToolIntent.CHECK_API, "query checks an external API"),
-            (["run", "execute", "test code"], ToolIntent.EXECUTE_CODE, "query asks to execute code"),
+            (
+                ["index", "scan project", "build index"],
+                ToolIntent.INDEX,
+                "query asks to index project",
+            ),
+            (
+                ["symbol", "defined", "function exists"],
+                ToolIntent.CHECK_SYMBOL,
+                "query checks a symbol",
+            ),
+            (
+                ["api", "library", "pandas", "numpy"],
+                ToolIntent.CHECK_API,
+                "query checks an external API",
+            ),
+            (
+                ["run", "execute", "test code"],
+                ToolIntent.EXECUTE_CODE,
+                "query asks to execute code",
+            ),
             (["scan file", "check file"], ToolIntent.SCAN_FILE, "query asks to scan a file"),
             (["dead code", "unused"], ToolIntent.FIND_DEAD_CODE, "query asks for dead code"),
-            (["call graph", "caller", "callee"], ToolIntent.EXPLORE_CALL_GRAPH, "query explores call graph"),
+            (
+                ["call graph", "caller", "callee"],
+                ToolIntent.EXPLORE_CALL_GRAPH,
+                "query explores call graph",
+            ),
             (["search", "find code"], ToolIntent.SEARCH_CODE, "query searches code"),
             (["type", "validate"], ToolIntent.VALIDATE_TYPES, "query validates types"),
         ]
@@ -165,8 +187,8 @@ class HonestRouter:
 
         parts = list(rel.with_suffix("").parts)
 
-        # Drop common source-layout prefixes (only the leading segment).
-        if parts and parts[0] == "src":
+        # Only strip "src" if it is a real layout prefix (has sub-packages after it).
+        if len(parts) > 1 and parts[0] == "src":
             parts = parts[1:]
 
         # __init__.py represents the package itself.

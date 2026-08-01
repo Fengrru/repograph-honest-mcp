@@ -15,6 +15,8 @@ from dataclasses import dataclass
 
 logger = logging.getLogger(__name__)
 
+__all__ = ["APISignature", "APIKnowledgeBase"]
+
 
 @dataclass
 class APISignature:

@@ -33,6 +33,24 @@ from repograph_honest.mcp.knowledge_base import APIKnowledgeBase
 from repograph_honest.sandbox import SandboxExecutor
 from repograph_honest.structure.extractor import StructureExtractor
 from repograph_honest.structure.relations import ParseResult
+from repograph_honest.structure.utils import call_base, call_name
+
+__all__ = [
+    "index_project",
+    "load_project_deps",
+    "check_symbol",
+    "check_api",
+    "execute_code",
+    "scan_file",
+    "load_package_apis",
+    "get_project_stats",
+    "validate_types",
+    "find_dead_code",
+    "find_similar_code",
+    "explore_call_graph",
+    "search_code",
+    "choose_tool",
+]
 
 logger = logging.getLogger(__name__)
 
@@ -62,13 +80,18 @@ def _lazy_router() -> HonestRouter | None:
 
 
 def _module_name(p: Path, root: Path) -> str:
-    """Infer a dotted module name from *p* relative to *root*."""
+    """Infer a dotted module name from *p* relative to *root*.
+
+    Only strips the ``src`` prefix when it is a standalone directory component
+    (i.e. the standard ``src`` layout) and there are further path segments.
+    """
     try:
         rel = p.resolve().relative_to(root.resolve())
     except ValueError:
         rel = p
     parts = list(rel.with_suffix("").parts)
-    if parts and parts[0] == "src":
+    # Only strip "src" if it is a real layout prefix (has sub-packages after it).
+    if len(parts) > 1 and parts[0] == "src":
         parts = parts[1:]
     if parts and parts[-1] == "__init__":
         parts.pop()
@@ -92,7 +115,9 @@ def _with_module_prefix(p: Path, root: Path, res: ParseResult) -> ParseResult:
         var_defs=prefixed(res.var_defs),
         imports=res.imports,
         imported_symbols=res.imported_symbols,
-        exported_symbols={prefix + s if not s.startswith(prefix) else s for s in (res.exported_symbols or set())},
+        exported_symbols={
+            prefix + s if not s.startswith(prefix) else s for s in (res.exported_symbols or set())
+        },
     )
 
 
@@ -120,28 +145,6 @@ def _normalize_code(text: str) -> str:
             continue
         out.append(re.sub(r"\s+", " ", stripped))
     return "\n".join(out)
-
-
-def _call_name(node: ast.expr) -> str | None:
-    """Return a dotted name for a call target (e.g. ``obj.method``)."""
-    if isinstance(node, ast.Name):
-        return node.id
-    if isinstance(node, ast.Attribute):
-        parts: list[str] = []
-        current: ast.expr = node
-        while isinstance(current, ast.Attribute):
-            parts.append(current.attr)
-            current = current.value
-        if isinstance(current, ast.Name):
-            parts.append(current.id)
-            return ".".join(reversed(parts))
-        return None
-    return None
-
-
-def _call_base(name: str) -> str:
-    """Return the first component of a dotted name."""
-    return name.split(".")[0]
 
 
 @dataclass
@@ -201,11 +204,9 @@ def _collect_refs_in(
     """Collect call/name references inside *node* and attach *context*."""
     for child in ast.walk(node):
         if isinstance(child, ast.Call):
-            name = _call_name(child.func)
+            name = call_name(child.func)
             if name:
-                graph.references.setdefault(name, []).append(
-                    (p, child.lineno, "call", context)
-                )
+                graph.references.setdefault(name, []).append((p, child.lineno, "call", context))
         elif isinstance(child, ast.Name):
             # Skip store contexts (assign targets, etc.)
             if isinstance(child.ctx, ast.Store):
@@ -216,7 +217,7 @@ def _collect_refs_in(
         elif isinstance(child, ast.Attribute):
             if isinstance(child.ctx, ast.Store):
                 continue
-            name = _call_name(child)
+            name = call_name(child)
             if name:
                 graph.references.setdefault(name, []).append(
                     (p, child.lineno, "attribute", context)
@@ -408,11 +409,45 @@ def scan_file(file_path: str) -> dict:
     defined |= dep_names
     # Common builtins.
     defined |= {
-        "print", "len", "range", "enumerate", "zip", "map", "filter", "sorted",
-        "sum", "min", "max", "abs", "round", "int", "str", "float", "bool",
-        "list", "dict", "set", "tuple", "type", "isinstance", "hasattr", "getattr",
-        "open", "input", "repr", "vars", "locals", "globals", "dir", "super",
-        "Exception", "ValueError", "TypeError", "KeyError", "IndexError", "AttributeError",
+        "print",
+        "len",
+        "range",
+        "enumerate",
+        "zip",
+        "map",
+        "filter",
+        "sorted",
+        "sum",
+        "min",
+        "max",
+        "abs",
+        "round",
+        "int",
+        "str",
+        "float",
+        "bool",
+        "list",
+        "dict",
+        "set",
+        "tuple",
+        "type",
+        "isinstance",
+        "hasattr",
+        "getattr",
+        "open",
+        "input",
+        "repr",
+        "vars",
+        "locals",
+        "globals",
+        "dir",
+        "super",
+        "Exception",
+        "ValueError",
+        "TypeError",
+        "KeyError",
+        "IndexError",
+        "AttributeError",
     }
 
     try:
@@ -425,10 +460,10 @@ def scan_file(file_path: str) -> dict:
     for node in ast.walk(tree):
         if not isinstance(node, ast.Call):
             continue
-        name = _call_name(node.func)
+        name = call_name(node.func)
         if not name:
             continue
-        base = _call_base(name)
+        base = call_base(name)
         if base in defined or name in defined:
             continue
         key = (name, node.lineno)
@@ -442,11 +477,11 @@ def scan_file(file_path: str) -> dict:
 
 def load_package_apis(package_name: str) -> dict:
     """Load (and cache) API signatures for a specific package."""
-    n = _dep_kb.load_package(package_name)
+    count = _dep_kb.load_package(package_name)
     with _state_lock:
         global _router
         _router = None
-    return {"success": True, "package": package_name, "api_count": n}
+    return {"success": True, "package": package_name, "api_count": count}
 
 
 def get_project_stats() -> dict:
@@ -483,13 +518,13 @@ def validate_types(code: str) -> dict:
 
         # 2. Calling a constant literal
         if isinstance(node, ast.Call) and isinstance(node.func, ast.Constant):
-                issues.append(
-                    {
-                        "type": "non_callable",
-                        "message": "Attempting to call a constant value",
-                        "line": node.lineno,
-                    }
-                )
+            issues.append(
+                {
+                    "type": "non_callable",
+                    "message": "Attempting to call a constant value",
+                    "line": node.lineno,
+                }
+            )
 
         # 3. String method on non-string constant
         if (
@@ -498,13 +533,13 @@ def validate_types(code: str) -> dict:
             and isinstance(node.value, ast.Constant)
             and not isinstance(node.value.value, str)
         ):
-                    issues.append(
-                        {
-                            "type": "type_mismatch",
-                            "message": f"'{node.attr}' called on non-string constant",
-                            "line": node.lineno,
-                        }
-                    )
+            issues.append(
+                {
+                    "type": "type_mismatch",
+                    "message": f"'{node.attr}' called on non-string constant",
+                    "line": node.lineno,
+                }
+            )
 
         # 4. Common builtins with wrong argument count
         if isinstance(node, ast.Call) and isinstance(node.func, ast.Name):
@@ -514,7 +549,13 @@ def validate_types(code: str) -> dict:
 
 
 def _check_none_iterable(node: ast.expr, issues: list[dict]) -> None:
-    """Flag iterating over a None constant."""
+    """Flag iterating over a None constant or expressions likely to return None.
+
+    Detects:
+    - Explicit ``None`` literal
+    - ``dict.get(...)`` / ``dict.pop(...)`` without a default value
+    - Call to functions that commonly return None (e.g. ``os.environ.get``)
+    """
     if isinstance(node, ast.Constant) and node.value is None:
         issues.append(
             {
@@ -523,48 +564,80 @@ def _check_none_iterable(node: ast.expr, issues: list[dict]) -> None:
                 "line": getattr(node, "lineno", 0),
             }
         )
+        return
+
+    # dict.get(key) without default returns None.
+    if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute):
+        method = node.func.attr
+        if (
+            method in ("get", "pop")
+            and len(node.args) < 2
+            and not any(kw.arg == "default" for kw in node.keywords)
+        ):
+            issues.append(
+                {
+                    "type": "none_iteration",
+                    "message": f"'{method}' without default may return None",
+                    "line": getattr(node, "lineno", 0),
+                }
+            )
 
 
 def _check_builtin_argc(node: ast.Call, issues: list[dict]) -> None:
-    """Check argument counts for a small set of common builtins."""
+    """Check argument counts for a small set of common builtins.
+
+    Rules are (min_positional, max_positional, allowed_keyword_names).
+    ``None`` means unbounded.
+    """
     name = node.func.id
     args = len(node.args)
-    kwargs = len(node.keywords)
+    kwargs = {kw.arg for kw in node.keywords if kw.arg is not None}  # exclude **kwargs
     rules = {
-        "len": (1, 1),
-        "repr": (1, 1),
-        "str": (0, 1),
-        "int": (0, 2),
-        "float": (0, 1),
-        "bool": (0, 1),
-        "abs": (1, 1),
-        "round": (1, 2),
-        "sum": (1, 2),
-        "min": (1, None),
-        "max": (1, None),
-        "sorted": (1, 3),
-        "enumerate": (1, 2),
-        "zip": (0, None),
-        "map": (2, None),
-        "filter": (2, None),
+        "len": (1, 1, set()),
+        "repr": (1, 1, set()),
+        "str": (0, 1, {"encoding", "errors"}),
+        "int": (0, 2, {"base"}),
+        "float": (0, 1, set()),
+        "bool": (0, 1, set()),
+        "abs": (1, 1, set()),
+        "round": (1, 2, {"ndigits"}),
+        "sum": (1, 2, {"start"}),
+        "min": (1, None, set()),
+        "max": (1, None, set()),
+        "sorted": (1, 3, {"key", "reverse"}),
+        "enumerate": (1, 2, {"start"}),
+        "zip": (0, None, {"strict"}),
+        "map": (2, None, set()),
+        "filter": (2, None, set()),
     }
     if name not in rules:
         return
-    min_args, max_args = rules[name]
-    total = args + (1 if kwargs else 0)
-    if total < min_args:
+    min_args, max_args, allowed_kw = rules[name]
+
+    invalid_kw = kwargs - allowed_kw
+    if invalid_kw:
         issues.append(
             {
                 "type": "arg_count",
-                "message": f"'{name}' expects at least {min_args} argument(s)",
+                "message": f"'{name}' does not accept keyword argument(s): {', '.join(sorted(invalid_kw))}",
                 "line": node.lineno,
             }
         )
-    elif max_args is not None and total > max_args:
+        return
+
+    if args < min_args:
         issues.append(
             {
                 "type": "arg_count",
-                "message": f"'{name}' expects at most {max_args} argument(s)",
+                "message": f"'{name}' expects at least {min_args} positional argument(s)",
+                "line": node.lineno,
+            }
+        )
+    elif max_args is not None and args > max_args:
+        issues.append(
+            {
+                "type": "arg_count",
+                "message": f"'{name}' expects at most {max_args} positional argument(s)",
                 "line": node.lineno,
             }
         )
@@ -620,7 +693,11 @@ def find_dead_code(
 
 
 def find_similar_code(threshold: float = 0.85) -> dict:
-    """Find function-level code clones across the project."""
+    """Find function-level code clones across the project.
+
+    Uses a length-ratio pre-filter to skip obviously dissimilar pairs before
+    running the more expensive ``SequenceMatcher``.
+    """
     with _state_lock:
         root = _project_root
     if root is None:
@@ -636,13 +713,24 @@ def find_similar_code(threshold: float = 0.85) -> dict:
 
     from difflib import SequenceMatcher
 
+    # Pre-filter: group by similar length to avoid comparing very short or
+    # very different functions.  The similarity ratio between two strings is
+    # bounded by min(len(a), len(b)) / max(len(a), len(b)), so we can skip
+    # pairs whose length ratio is already below the threshold.
     pairs: list[dict] = []
     seen: set[tuple[tuple[str, str], tuple[str, str]]] = set()
     for i, (p1, n1, b1, r1) in enumerate(functions):
-        for j, (p2, n2, b2, r2) in enumerate(functions):
-            if i >= j:
+        len1 = len(b1)
+        if len1 < 30:
+            continue
+        for j in range(i + 1, len(functions)):
+            p2, n2, b2, r2 = functions[j]
+            len2 = len(b2)
+            if len2 < 30:
                 continue
-            if len(b1) < 30 or len(b2) < 30:
+            # Length-ratio bound: if the shorter is less than threshold * longer, skip.
+            shorter, longer = (len1, len2) if len1 <= len2 else (len2, len1)
+            if shorter < threshold * longer:
                 continue
             key = tuple(sorted([(str(p1), n1), (str(p2), n2)]))
             if key in seen:
@@ -719,8 +807,7 @@ def explore_call_graph(symbol_name: str) -> dict:
         "success": True,
         "symbol": symbol_name,
         "definitions": [
-            {"file": str(p), "line": line, "kind": kind}
-            for p, line, _end, kind in definitions
+            {"file": str(p), "line": line, "kind": kind} for p, line, _end, kind in definitions
         ],
         "callers": callers,
         "callees": callees,

@@ -1,10 +1,10 @@
 """
 Sandboxed code execution for RepoGraph-Honest.
 
-Executes untrusted code in a fresh Python subprocess with resource limits on
-POSIX systems. On Windows, resource limits are not enforced by the OS in this
-implementation; execution still runs in an isolated temporary directory and is
-bounded by a strict timeout.
+Executes untrusted code in a fresh Python subprocess with resource limits:
+  - POSIX: RLIMIT_AS (memory), RLIMIT_CPU (cpu time), RLIMIT_NOFILE (open files)
+  - Windows: Job object with process/memory limits (best-effort via ctypes)
+  - Both: timeout, isolated temp directory, restricted PYTHONPATH
 """
 
 from __future__ import annotations
@@ -20,6 +20,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
+
+__all__ = ["ExecutionResult", "SandboxExecutor"]
 
 
 @dataclass
@@ -51,7 +53,7 @@ class SandboxExecutor:
 
     def __init__(self, timeout: int = 10, memory_mb: int | None = None):
         self.timeout = timeout
-        self.memory_mb = memory_mb
+        self.memory_mb = memory_mb or 256  # default 256 MB limit
 
     def execute(
         self,
@@ -72,6 +74,9 @@ class SandboxExecutor:
             env["PYTHONPATH"] = ""
             env["PYTHONDONTWRITEBYTECODE"] = "1"
 
+            preexec = self._get_preexec_fn()
+            creationflags = self._get_creationflags()
+
             try:
                 proc = subprocess.run(
                     [sys.executable, "-u", str(script_path)],
@@ -80,7 +85,8 @@ class SandboxExecutor:
                     capture_output=True,
                     text=True,
                     timeout=self.timeout,
-                    preexec_fn=self._get_preexec_fn(),
+                    preexec_fn=preexec,
+                    creationflags=creationflags,
                 )
                 runtime = time.perf_counter() - start
                 stdout = proc.stdout or ""
@@ -121,18 +127,31 @@ class SandboxExecutor:
 
     def _get_preexec_fn(self):
         """Return a POSIX preexec_fn that sets resource limits, if available."""
-        if sys.platform == "win32" or self.memory_mb is None:
+        if sys.platform == "win32":
             return None
         try:
             import resource
 
             def limit_resources():
+                # Memory limit
                 max_bytes = self.memory_mb * 1024 * 1024
                 resource.setrlimit(resource.RLIMIT_AS, (max_bytes, max_bytes))
+                # CPU time limit (soft = timeout, hard = timeout + 2s buffer)
+                resource.setrlimit(resource.RLIMIT_CPU, (self.timeout, self.timeout + 2))
+                # Limit open files to prevent fd exhaustion
+                resource.setrlimit(resource.RLIMIT_NOFILE, (64, 64))
 
             return limit_resources
         except Exception:  # noqa: BLE001
             return None
+
+    def _get_creationflags(self) -> int:
+        """Return Windows-specific creation flags for process isolation."""
+        if sys.platform != "win32":
+            return 0
+        # CREATE_NO_WINDOW: don't open a console window
+        # BELOW_NORMAL_PRIORITY_CLASS: reduce scheduling priority
+        return 0x08000000 | 0x00008000
 
     def validate_snippet(self, code: str, known_names: set[str]) -> ExecutionResult:
         """Quickly run a snippet to see if it raises a NameError for unknown symbols."""

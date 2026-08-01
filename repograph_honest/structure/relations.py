@@ -3,6 +3,8 @@
 from dataclasses import dataclass
 from enum import Enum
 
+__all__ = ["RelationType", "StructEdge", "ParseResult"]
+
 
 class RelationType(Enum):
     DEF_CALL = "def_call"

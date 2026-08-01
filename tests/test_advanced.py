@@ -30,9 +30,7 @@ def sample_project(tmp_path: Path):
         "class Worker:\n    def work(self):\n        return helper()\n",
         encoding="utf-8",
     )
-    (tmp_path / "pkg" / "unused.py").write_text(
-        "def orphan():\n    return 42\n", encoding="utf-8"
-    )
+    (tmp_path / "pkg" / "unused.py").write_text("def orphan():\n    return 42\n", encoding="utf-8")
     return tmp_path
 
 

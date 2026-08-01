@@ -86,9 +86,7 @@ def mcp_check_api(api_name: str) -> dict:
 
 
 @mcp.tool()
-def mcp_execute_code(
-    code: str, prelude: str = "", known_names: list[str] | None = None
-) -> dict:
+def mcp_execute_code(code: str, prelude: str = "", known_names: list[str] | None = None) -> dict:
     """Execute code in a sandbox and return stdout/stderr plus structured
     error analysis with fix suggestions.
 

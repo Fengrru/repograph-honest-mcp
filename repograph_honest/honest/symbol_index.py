@@ -18,6 +18,8 @@ from repograph_honest.structure.extractor import StructureExtractor
 
 logger = logging.getLogger(__name__)
 
+__all__ = ["SymbolInfo", "SymbolIndex", "ProjectIndex", "get_project_index"]
+
 
 @dataclass
 class SymbolInfo:
@@ -166,13 +168,18 @@ def _index_directory(root: Path, extractor: StructureExtractor) -> ProjectIndex:
 
 
 def _module_name(file: Path, root: Path) -> str:
-    """Infer a dotted module name from *file* relative to *root*."""
+    """Infer a dotted module name from *file* relative to *root*.
+
+    Only strips the ``src`` prefix when it is a standalone directory component
+    (i.e. the standard ``src`` layout) and there are further path segments.
+    """
     try:
         rel = file.resolve().relative_to(root.resolve())
     except ValueError:
         rel = file
     parts = list(rel.with_suffix("").parts)
-    if parts and parts[0] == "src":
+    # Only strip "src" if it is a real layout prefix (has sub-packages after it).
+    if len(parts) > 1 and parts[0] == "src":
         parts = parts[1:]
     if parts and parts[-1] == "__init__":
         parts.pop()
@@ -221,9 +228,7 @@ def get_project_index(
         if not _should_rebuild(resolved, cache_path):
             try:
                 data = json.loads(cache_path.read_text(encoding="utf-8"))
-                symbols = {
-                    n: SymbolInfo(**i) for n, i in data.get("symbols", {}).items()
-                }
+                symbols = {n: SymbolInfo(**i) for n, i in data.get("symbols", {}).items()}
                 idx = ProjectIndex(
                     root=data.get("root", str(resolved)),
                     symbols=symbols,

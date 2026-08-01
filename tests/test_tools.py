@@ -108,9 +108,7 @@ def test_get_project_index(tmp_path: Path):
 
 
 def test_index_distinguishes_exported_local(tmp_path: Path):
-    (tmp_path / "mod.py").write_text(
-        "def public(): pass\ndef _private(): pass\n", encoding="utf-8"
-    )
+    (tmp_path / "mod.py").write_text("def public(): pass\ndef _private(): pass\n", encoding="utf-8")
     idx = get_project_index(tmp_path, force_rebuild=True, cache_dir=tmp_path / "cache")
     assert idx.symbols["mod.public"].exported is True
     assert idx.symbols["mod._private"].exported is False
