@@ -28,12 +28,8 @@ your editor — pure AST analysis, no LLM calls, no network requests.
 
 ```mermaid
 graph LR
-    A["AI Model<br/>generates code"] -->|sends code| B["RepoGraph-Honest<br/>verifies against project"]
-    B -->|clean code| C["Editor<br/>receives verified code"]
-
-    style A fill:#e1f5fe,stroke:#0288d1
-    style B fill:#c8e6c9,stroke:#388e3c
-    style C fill:#fff3e0,stroke:#f57c00
+    A["AI Model generates code"] -->|sends code| B["RepoGraph-Honest verifies against project"]
+    B -->|clean code| C["Editor receives verified code"]
 ```
 
 ### One tool by default: `scan_file`
@@ -352,18 +348,11 @@ repograph-honest-mcp search "def \w+_helper"
 
 ```mermaid
 graph TD
-    Client["MCP Client"] -->|tool call| Tools["tools.py<br/>(14 tools)"]
-    Tools -->|parse file| Extractor["Extractor<br/>(tree-sitter)"]
-    Extractor --> AST["AST Parse<br/>(Python ast)"]
-    Tools -->|lookup symbol| Index["Symbol Index<br/>(cache)"]
-    Tools -->|check API| KB["Knowledge Base<br/>(dep APIs)"]
-
-    style Client fill:#e1f5fe,stroke:#0288d1
-    style Tools fill:#c8e6c9,stroke:#388e3c
-    style Extractor fill:#fff3e0,stroke:#f57c00
-    style AST fill:#fce4ec,stroke:#c62828
-    style Index fill:#f3e5f5,stroke:#7b1fa2
-    style KB fill:#f3e5f5,stroke:#7b1fa2
+    Client["MCP Client"] -->|tool call| Tools["tools.py (14 tools)"]
+    Tools -->|parse file| Extractor["Extractor (tree-sitter)"]
+    Extractor --> AST["AST Parse (Python ast)"]
+    Tools -->|lookup symbol| Index["Symbol Index (cache)"]
+    Tools -->|check API| KB["Knowledge Base (dep APIs)"]
 ```
 
 ### Module layout
