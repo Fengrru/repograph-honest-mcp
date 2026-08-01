@@ -1,23 +1,12 @@
-"""MCP server integration for RepoGraph-Honest."""
+"""MCP server integration for RepoGraph-Honest.
 
-from repograph_honest.mcp.knowledge_base import APIKnowledgeBase, APISignature
-from repograph_honest.mcp.server import main, mcp
-from repograph_honest.mcp.tools import (
-    check_api,
-    check_symbol,
-    choose_tool,
-    execute_code,
-    explore_call_graph,
-    find_dead_code,
-    find_similar_code,
-    get_project_stats,
-    index_project,
-    load_package_apis,
-    load_project_deps,
-    scan_file,
-    search_code,
-    validate_types,
-)
+Import directly from submodules to avoid loading the MCP server eagerly:
+
+    from repograph_honest.mcp.tools import scan_file
+    from repograph_honest.mcp.server import main
+"""
+
+from __future__ import annotations
 
 __all__ = [
     "APIKnowledgeBase",
@@ -39,3 +28,19 @@ __all__ = [
     "search_code",
     "validate_types",
 ]
+
+
+def __getattr__(name: str):
+    if name in ("main", "mcp"):
+        from repograph_honest.mcp.server import main, mcp
+
+        return {"main": main, "mcp": mcp}[name]
+    if name in ("APIKnowledgeBase", "APISignature"):
+        from repograph_honest.mcp.knowledge_base import APIKnowledgeBase, APISignature
+
+        return {"APIKnowledgeBase": APIKnowledgeBase, "APISignature": APISignature}[name]
+    if name in __all__:
+        from repograph_honest.mcp import tools
+
+        return getattr(tools, name)
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
