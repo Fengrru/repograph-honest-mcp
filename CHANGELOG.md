@@ -28,6 +28,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Align pre-commit hooks with ruff** — `ruff-pre-commit` bumped to
   `v0.16.1` (from `v0.11.13`), removing the stale UP038 rule drift that failed
   the lint job.
+- **Sandbox: best-effort resource limits** — each `setrlimit` call in the
+  POSIX `preexec_fn` is now guarded individually. Some platforms (e.g. macOS
+  CI runners) reject certain limits, and a single failure inside
+  `preexec_fn` killed the child before it could run (`Sandbox failed:
+  Exception occurred in preexec_fn.`), breaking all sandbox tests on macOS.
 
 ### Added
 

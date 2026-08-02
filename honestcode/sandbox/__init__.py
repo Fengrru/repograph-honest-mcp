@@ -126,24 +126,35 @@ class SandboxExecutor:
                 )
 
     def _get_preexec_fn(self):
-        """Return a POSIX preexec_fn that sets resource limits, if available."""
+        """Return a POSIX preexec_fn that sets resource limits, if available.
+
+        Each limit is applied best-effort: some platforms (e.g. macOS CI
+        runners) reject certain ``setrlimit`` calls, and a single failure
+        inside ``preexec_fn`` kills the child before it can run at all.
+        """
         if sys.platform == "win32":
             return None
         try:
             import resource
-
-            def limit_resources():
-                # Memory limit
-                max_bytes = self.memory_mb * 1024 * 1024
-                resource.setrlimit(resource.RLIMIT_AS, (max_bytes, max_bytes))
-                # CPU time limit (soft = timeout, hard = timeout + 2s buffer)
-                resource.setrlimit(resource.RLIMIT_CPU, (self.timeout, self.timeout + 2))
-                # Limit open files to prevent fd exhaustion
-                resource.setrlimit(resource.RLIMIT_NOFILE, (64, 64))
-
-            return limit_resources
         except Exception:  # noqa: BLE001
             return None
+
+        def limit_resources():
+            def _setrlimit(name, soft, hard):
+                try:
+                    resource.setrlimit(getattr(resource, name), (soft, hard))
+                except (ValueError, OSError):
+                    logger.warning("Could not set %s in sandbox: %s", name, sys.exc_info()[1])
+
+            # Memory limit
+            max_bytes = self.memory_mb * 1024 * 1024
+            _setrlimit("RLIMIT_AS", max_bytes, max_bytes)
+            # CPU time limit (soft = timeout, hard = timeout + 2s buffer)
+            _setrlimit("RLIMIT_CPU", self.timeout, self.timeout + 2)
+            # Limit open files to prevent fd exhaustion
+            _setrlimit("RLIMIT_NOFILE", 64, 64)
+
+        return limit_resources
 
     def _get_creationflags(self) -> int:
         """Return Windows-specific creation flags for process isolation."""
