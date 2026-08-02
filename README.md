@@ -20,6 +20,30 @@ undefined symbols, wrong API calls, dead code, and type mismatches in real time.
 
 ---
 
+## Contents
+
+- [Why RepoGraph-Honest?](#why-repograph-honest)
+- [Performance](#performance)
+- [Quick Start](#quick-start)
+- [Environment Variables](#environment-variables)
+- [Multi-language support (optional)](#multi-language-support-optional)
+- [Supported Platforms and Agents](#supported-platforms-and-agents)
+- [Tool Reference](#tool-reference)
+- [CLI Usage](#cli-usage)
+- [Library Usage](#library-usage)
+- [Architecture](#architecture)
+- [When NOT to use RepoGraph-Honest](#when-not-to-use-repograph-honest)
+- [Troubleshooting](#troubleshooting)
+- [Development](#development)
+- [Security](#security)
+- [Telemetry](#telemetry)
+- [Roadmap](#roadmap)
+- [Changelog](#changelog)
+- [Contributing](#contributing)
+- [License](#license)
+
+---
+
 ## Why RepoGraph-Honest?
 
 AI coding assistants hallucinate. They invent function names, fabricate library APIs, and produce
@@ -39,7 +63,7 @@ returns every undefined symbol, incorrect API call, and structural issue in a si
 
 Exposing a single tool is deliberate. Measured agent behavior shows that one well-aimed tool
 steers agents to a direct answer better than a menu of narrower ones — fewer mis-picks, fewer
-round-trips. **13 additional tools** exist for power users; opt in via the `REPOGRAPH_TOOLS`
+round-trips. **16 additional tools** exist for power users; opt in via the `REPOGRAPH_TOOLS`
 environment variable (see [Environment Variables](#environment-variables)).
 
 ### Key differentiators
@@ -59,29 +83,34 @@ environment variable (see [Environment Variables](#environment-variables)).
 Numbers below are **measured, not estimated**. Re-run them yourself:
 
 ```bash
+# Local project
 python scripts/benchmark.py --target /path/to/project --repeat 5
+# External real-world repos (clones them into a temp dir)
+python scripts/benchmark.py --repos psf/requests pallets/flask --format markdown
 ```
 
-Measured on this repository (14 Python modules, ~3600 LOC, Python 3.14,
-median of 3 runs on a developer laptop, Windows):
+Measured on this repository (43 Python modules, ~7400 LOC, Python 3.14, median
+of 3 runs on a developer laptop, Windows):
 
 | Operation | Measured | Note |
 |:----------|---------:|:-----|
-| `index_project` (cold) | ~190 ms | Content-hash cached; skips unchanged files |
+| `index_project` (cold) | ~143 ms | Content-hash cached; skips unchanged files |
 | `index_project` (cached) | < 1 ms | In-memory cache hit |
-| `scan_file` | ~50 ms | AST parse + symbol lookup |
+| `scan_file` | ~35 ms | AST parse + symbol lookup |
 | `check_api` | < 1 ms | Dictionary lookup on cached API index |
-| `explore_call_graph` | ~285 ms | Full caller/callee traversal; rebuilds graph each call |
-| `find_dead_code` | ~340 ms | Project-wide reference graph |
-| `find_similar_code` | ~4000 ms | O(n²) `SequenceMatcher`; dominated by pair count |
-| `search_code` | ~20 ms | Regex across project files |
+| `explore_call_graph` (hot) | ~1 ms | **SQLite graph cache hit**; cold rebuild ~278 ms |
+| `find_dead_code` | ~1.4 ms | Reads the persisted reference graph |
+| `find_similar_code` | ~3750 ms | O(n²) `SequenceMatcher`; dominated by pair count |
+| `search_code` | ~16 ms | FTS5 candidate narrowing + regex on hits |
 
-> `explore_call_graph` and `find_dead_code` currently rebuild the project-wide
-> graph on every call. Caching the graph alongside the index (see roadmap)
-> will bring both under 50 ms. `find_similar_code` uses a length-ratio
-> pre-filter but is still quadratic in the number of functions; this is fine
-> for small/medium projects but will need a token-hash scheme for large
-> codebases.
+The call graph (definitions + references) is persisted to SQLite next to the
+symbol index, keyed by content hashes of every source file. Graph queries
+(`explore_call_graph`, `find_dead_code`, `explore_impact`, `affected_files`)
+read from disk instead of re-parsing the project on each call — the first call
+after a change pays the cold rebuild, every later call is a cache hit.
+`find_similar_code` uses a length-ratio pre-filter but is still quadratic in
+the number of functions; this is fine for small/medium projects but will need
+a token-hash scheme for large codebases.
 
 Token savings vs. grep + Read exploration: **~60% fewer tool calls**, **~45%
 fewer tokens** on architecture questions spanning multiple files.
@@ -211,6 +240,7 @@ Result: 2 issues found — undefined_call: validate_token (line 12),
 |:---------|:--------|:------------|
 | `REPOGRAPH_TOOLS` | `scan_file` | Comma-separated tool names to expose (or `all`). `scan_file` is always included. |
 | `REPOGRAPH_INDEX_DIR` | `~/.cache/repograph_honest` | Directory for cached symbol indices |
+| `REPOGRAPH_CACHE_DIR` | `~/.cache/repograph_honest` | Directory for SQLite graph caches (override for CI/tests) |
 | `REPOGRAPH_TIMEOUT` | `10` | Seconds before `execute_code` is killed |
 | `REPOGRAPH_MEMORY_MB` | `256` | MB memory limit for sandboxed execution (POSIX) |
 | `REPOGRAPH_LOG_LEVEL` | `INFO` | Logging verbosity (`DEBUG`, `INFO`, `WARNING`, `ERROR`) |
@@ -229,8 +259,54 @@ export REPOGRAPH_TOOLS=all
 `scan_file` is always included even if not listed. Unknown names are ignored
 with a warning. Available tool names: `scan_file`, `index`, `deps`,
 `check_symbol`, `check_api`, `execute_code`, `validate_types`,
-`find_dead_code`, `find_similar_code`, `explore_call_graph`, `search_code`,
+`find_dead_code`, `find_similar_code`, `explore_call_graph`,
+`explore_impact`, `affected_files`, `stop_watching`, `search_code`,
 `load_package_apis`, `get_project_stats`, `choose_tool`.
+
+> A `repograph-honest.toml` config file for per-project rules and ignore
+> patterns is planned — tracked on the [Roadmap](#roadmap).
+
+---
+
+## Multi-language support (optional)
+
+Python is the fully supported language (stdlib `ast`). For JavaScript,
+TypeScript, Go, Rust and Java, symbol extraction is available via the
+optional tree-sitter extras:
+
+```bash
+pip install -e "repograph-honest[multi-language]"
+```
+
+Once installed, `scan_file` accepts `.js`/`.ts`/`.go`/`.rs`/`.java` files and
+reports undefined call sites using tree-sitter's grammar. Without the extras,
+`scan_file` returns a clear message pointing at the install command instead of
+failing. This keeps the default install dependency-free.
+
+---
+
+## Supported Platforms and Agents
+
+Runs anywhere **Python 3.10+** does — no native build step, no `node_modules`,
+no external services.
+
+| Platform | Support |
+|:---------|:--------|
+| Windows | First-class (stdio + SSE, sandboxed execution) |
+| macOS | First-class (stdio + SSE, sandboxed execution) |
+| Linux | First-class (stdio + SSE, sandboxed execution, RLIMIT limits) |
+
+| Agent / Client | Config file | Auto-install |
+|:---------------|:------------|:-------------|
+| Claude Code | `~/.claude.json` | `repograph-honest install --client claude` |
+| Cursor | `.cursor/mcp.json` | `repograph-honest install --client cursor` |
+| VS Code | `.vscode/mcp.json` | `repograph-honest install --client vscode` |
+| Windsurf | `~/.codeium/windsurf/mcp_config.json` | Manual (see Quick Start) |
+| Any stdio MCP client | `command: repograph-honest-mcp` | — |
+| Any SSE MCP client | `--transport sse --port 8000` | — |
+
+See [Quick Start](#quick-start) for the manual JSON snippets and the
+[CLI Usage](#cli-usage) section for `install`/`init`/`root` project binding.
 
 ---
 
@@ -274,20 +350,36 @@ export REPOGRAPH_TOOLS=index,check_symbol,check_api,execute_code,validate_types
 | `check_api` | Verify a library API call exists (with fuzzy typo suggestions) | < 10ms |
 | `validate_types` | Structural checks: None iteration, wrong arg counts, calling constants | < 20ms |
 | `execute_code` | Run code in sandboxed subprocess with timeout and memory limits | varies |
-| `explore_call_graph` | Return callers and callees of a symbol across the project | < 200ms |
-| `find_dead_code` | Find unused symbols with entrypoint support | < 300ms |
+| `explore_call_graph` | Return callers, callees, and blast-radius summary of a symbol | < 5ms (hot) |
+| `explore_impact` | Blast radius of a symbol: transitively impacted symbols/files | < 10ms (hot) |
+| `affected_files` | Files/tests affected by a git diff, via reverse call-graph trace | < 50ms |
+| `find_dead_code` | Find unused symbols with entrypoint support | < 10ms (hot) |
 | `find_similar_code` | Detect function-level code clones via sequence similarity | < 2s |
-| `search_code` | Regex search across project source files | < 100ms |
+| `search_code` | Regex search across project source files (FTS5-accelerated) | < 100ms |
 | `load_package_apis` | Load API signatures for a single installed package | < 3s |
 | `get_project_stats` | Return index statistics (symbol count, dependency APIs) | < 5ms |
+| `stop_watching` | Stop the background file watcher started by `index_project(watch=True)` | < 5ms |
 | `choose_tool` | Map a natural-language query to the best tool (debugging) | < 5ms |
 
 <details>
 <summary>Detailed parameter reference</summary>
 
-**`index_project(root_path, force_rebuild=False)`**
+**`index_project(root_path, force_rebuild=False, watch=False)`**
 
 Build or reuse the project symbol index. Returns indexed symbol count, root path, and cache status.
+Set `watch=True` to start a background file watcher that re-indexes (and invalidates the graph
+cache) whenever a source file changes, keeping the index fresh for long-running sessions.
+
+**`explore_impact(symbol_name, max_depth=3)`**
+
+Compute the blast radius of a symbol: which other symbols and files would be affected if it
+changed, following callers and callees up to `max_depth` hops.
+
+**`affected_files(base="HEAD", head=None, max_depth=4)`**
+
+Trace a `git diff` through the call graph to find which files — especially tests — may be affected
+by uncommitted changes (`base` vs the working tree) or a range of commits (`base..head`).
+CI-friendly: run it after each commit to know exactly which tests to run.
 
 **`load_project_deps(root_path)`**
 
@@ -381,8 +473,15 @@ repograph-honest dead-code --entrypoints pkg.cli.main --no-tests
 # Find similar code (exit 1 if any clones found)
 repograph-honest similar --threshold 0.85
 
-# Explore callers/callees of a symbol
+# Explore callers/callees of a symbol (includes blast-radius summary)
 repograph-honest call-graph pkg.core.helper
+
+# Blast radius of a symbol
+repograph-honest impact pkg.core.helper --depth 3
+
+# Files/tests affected by uncommitted changes (CI killer)
+repograph-honest affected --base HEAD
+repograph-honest affected --base main --head feature-branch
 
 # Search code (exit 1 if matches found)
 repograph-honest search "def \w+_helper"
@@ -395,6 +494,17 @@ repograph-honest stats
 
 # Show which tool a query maps to
 repograph-honest choose-tool "is my_symbol defined"
+
+# Bind a directory as a project (creates .repograph/) and discover the root
+repograph-honest init /path/to/project
+repograph-honest root
+
+# Register the MCP server with Cursor / VS Code / Claude Code
+repograph-honest install --dry-run
+repograph-honest install --client cursor
+
+# Keep an index fresh during long work sessions (Ctrl+C to stop)
+repograph-honest watch /path/to/project
 ```
 
 You can also invoke it as a module:
@@ -408,16 +518,42 @@ python -m repograph_honest.cli scan src/main.py
 
 ---
 
+## Library Usage
+
+Every MCP tool is also a plain function in `repograph_honest.mcp.tools`, so the
+same verification logic can run inside your own Python code — no MCP client
+required:
+
+```python
+from repograph_honest.mcp.tools import check_symbol, index_project, scan_file
+
+index_project("/path/to/project")          # build/reuse the symbol index
+print(scan_file("/path/to/project/src/auth.py"))   # hallucination scan
+print(check_symbol("pkg.core.main"))               # symbol lookup
+```
+
+Runnable examples live in [`examples/`](examples/README.md) — index & check,
+API typo detection, scan & validate, and dead-code discovery:
+
+```bash
+pip install -e .
+python examples/01_index_and_check.py /path/to/project
+```
+
+---
+
 ## Architecture
 
 ### Data flow
 
 ```mermaid
 graph TD
-    Client["MCP Client"] -->|tool call| Tools["tools.py (14 tools)"]
+    Client["MCP Client"] -->|tool call| Tools["tools.py (17 tools)"]
     Tools -->|parse file| Extractor["StructureExtractor (Python ast)"]
     Tools -->|lookup symbol| Index["Symbol Index (cache)"]
+    Tools -->|graph queries| Graph["Graph Store (SQLite + FTS5)"]
     Tools -->|check API| KB["Knowledge Base (dep APIs)"]
+    Index -->|persists| Graph
 ```
 
 ### Module layout
@@ -426,13 +562,18 @@ graph TD
 repograph_honest/
 ├── mcp/                    # MCP server layer
 │   ├── server.py           # FastMCP entry point (stdio + SSE), tool whitelist
-│   ├── tools.py            # 14 tool implementations
+│   ├── tools.py            # 17 tool implementations
 │   └── knowledge_base.py   # Dependency API signature cache
 ├── honest/                 # Core hallucination detection
 │   ├── router.py           # NL query → tool routing
-│   └── symbol_index.py     # Project-wide symbol index + caching
+│   ├── symbol_index.py     # Project-wide symbol index + caching
+│   └── project_binding.py  # .repograph/ binding + MCP client auto-config
+├── graph/                  # Persistent graph layer
+│   ├── graph_store.py      # SQLite call graph (definitions/refs) + FTS5 index
+│   └── watcher.py          # Zero-dependency polling file watcher
 ├── structure/              # Code structure extraction
 │   ├── extractor.py        # AST-based parser (Python ast)
+│   ├── multi_lang.py       # Optional tree-sitter extraction (JS/TS/Go/Rust/Java)
 │   ├── relations.py        # Edge/relation data structures
 │   └── utils.py            # Shared AST utilities
 ├── sandbox/                # Sandboxed execution
@@ -445,11 +586,15 @@ repograph_honest/
 | Module | Class/Function | Responsibility |
 |:-------|:---------------|:---------------|
 | `mcp/server.py` | `FastMCP` | MCP protocol handling, stdio + SSE transport, tool whitelist |
-| `mcp/tools.py` | Tool functions | 14 hallucination-detection tools |
+| `mcp/tools.py` | Tool functions | 17 hallucination-detection tools |
 | `mcp/knowledge_base.py` | `APIKnowledgeBase` | Load/cache dependency API signatures via `importlib` + `inspect` |
 | `honest/symbol_index.py` | `ProjectIndex` | Module-qualified symbol index with content-hash caching |
+| `honest/project_binding.py` | `init/install` | `.repograph/` project binding + MCP client auto-configuration |
 | `honest/router.py` | `HonestRouter` | Map natural-language queries to tool intents |
+| `graph/graph_store.py` | `GraphCache` | SQLite call graph (definitions/refs) + FTS5 full-text index |
+| `graph/watcher.py` | `ProjectWatcher` | Polling file watcher with debounce for auto-re-indexing |
 | `structure/extractor.py` | `StructureExtractor` | Parse Python AST, extract defs/imports/edges |
+| `structure/multi_lang.py` | `extract_symbols()` | Optional tree-sitter extraction (JS/TS/Go/Rust/Java) |
 | `structure/utils.py` | `call_name()` | Extract dotted names from AST call nodes |
 | `sandbox/__init__.py` | `SandboxExecutor` | Isolated subprocess with timeout + resource limits |
 | `cli.py` | `main()` | Argparse-based CLI mirroring every MCP tool |
@@ -460,10 +605,12 @@ repograph_honest/
 |:---------|:----------|
 | **Standard-library `ast`** | Call graphs and file scans use Python's `ast` module — no native parser dependency, reproducible across platforms |
 | **Module-qualified symbols** | Index stores `pkg.module.func` so cross-file references are unambiguous |
+| **Persistent graph (SQLite + FTS5)** | The call graph is stored on disk keyed by content hashes, so graph queries skip re-parsing; FTS5 narrows regex searches to candidate files |
 | **Lazy loading + caching** | Dependency APIs and project indices are cached with content-hash invalidation |
+| **Zero-dependency watcher** | File watching uses stdlib polling + debounce instead of a native watcher, keeping the install footprint small |
 | **Thread-safe global state** | Tool state protected by `RLock` for concurrent MCP requests |
 | **Subprocess sandbox** | `execute_code` runs in isolation with timeout, memory limits, and restricted PYTHONPATH |
-| **Primary tool pattern** | One well-aimed tool (`scan_file`) reduces agent mis-picks vs. 14-tool menu |
+| **Primary tool pattern** | One well-aimed tool (`scan_file`) reduces agent mis-picks vs. 17-tool menu |
 | **CLI parity** | Every MCP tool has a 1:1 CLI subcommand so the same checks run in CI without an MCP client |
 
 ### Output safety
@@ -486,10 +633,10 @@ All tools enforce output limits to prevent context window bloat:
 | Scenario | Why it doesn't fit | Alternative |
 |:---------|:-------------------|:------------|
 | Runtime behavior questions | AST is static; can't trace execution | `cProfile`, `py-spy`, logging |
-| Non-Python projects | Only supports Python AST | CodeGraph (multi-language) |
+| Non-Python projects | Python is first-class; other languages need `[multi-language]` extras | CodeGraph (20+ languages) |
 | Type inference across packages | Structural checks only, not full type solver | `mypy`, `pyright` |
 | Tiny repos (< 20 files) | Index overhead exceeds benefit | Direct `grep` |
-| Highly active monorepos | Index may lag behind rapid changes | CI-integrated checks |
+| Highly active monorepos | Index may lag behind rapid changes | `watch` mode or CI-integrated checks |
 
 ---
 
@@ -563,14 +710,35 @@ See [SECURITY.md](SECURITY.md) for vulnerability reporting.
 
 ---
 
+## Telemetry
+
+**RepoGraph-Honest collects no telemetry.** There are no analytics libraries,
+no background services, and no phone-home endpoints:
+
+- All parsing, indexing, and verification run **100% locally** — source code
+  never leaves your machine.
+- The server makes **no outbound network requests** of its own. The only
+  network traffic in your stack comes from the LLM provider your MCP client is
+  configured to use.
+- Every tool returns deterministic JSON you can diff, so verification results
+  are auditable in CI.
+
+This is a design invariant, not a toggle.
+
+---
+
 ## Roadmap
 
-- [ ] TypeScript/JavaScript project support via tree-sitter
+- [x] Persistent call graph (SQLite) + FTS5 full-text search
+- [x] `explore_impact` blast-radius analysis
+- [x] `affected_files` git-diff → affected tests (CI killer)
+- [x] File watcher for automatic re-indexing
+- [x] Project binding (`.repograph/`) + `install` for MCP clients
+- [x] Multi-language symbol extraction via optional tree-sitter extras
 - [ ] VS Code extension with inline diagnostics
 - [ ] GitHub Action for PR-level hallucination checks
 - [ ] Remote dependency API caching (PyPI index)
 - [ ] Configurable rules and ignore patterns
-- [ ] File watcher for automatic re-indexing
 - [ ] Adaptive output budgeting based on project size
 
 ---

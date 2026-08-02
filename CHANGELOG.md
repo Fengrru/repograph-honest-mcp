@@ -9,10 +9,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Persistent call graph (SQLite)** — `graph/graph_store.py` persists the
+  project-wide definitions/references graph next to the symbol index, keyed by
+  content hashes of every source file. `explore_call_graph` and
+  `find_dead_code` now read from disk instead of re-parsing on every call:
+  measured **~1 ms** hot (was ~285 ms / ~340 ms). First call after a change
+  pays a cold rebuild (~278 ms on this repo).
+- **FTS5 full-text search** — `search_code` narrows plain-`*.py` regex scans
+  to candidate files via a FTS5 virtual table, keeping results identical
+  (superset candidate set) while touching far fewer files on large repos.
+- **`explore_impact` tool** — blast radius of a symbol: transitively impacted
+  symbols/files via bidirectional call-graph BFS; `explore_call_graph` now
+  also returns an `impact` summary.
+- **`affected_files` tool** — trace a `git diff` through the call graph to
+  find affected files and tests (CI-friendly).
+- **File watcher** — zero-dependency polling watcher (`graph/watcher.py`)
+  with debounce; `index_project(watch=True)`, CLI `watch` subcommand, and
+  `stop_watching` tool keep the index fresh automatically.
+- **Project binding & client install** — `repograph-honest init` /
+  `uninit` / `install` / `root`: `.repograph/` binding directory plus
+  auto-configuration of Cursor, VS Code and Claude Code MCP configs.
+- **Multi-language support (optional)** — `repograph-honest[multi-language]`
+  extras with tree-sitter symbol extraction for JS/TS/Go/Rust/Java;
+  `scan_file` handles non-Python files when installed, and degrades with a
+  clear message otherwise.
+- **External-repo benchmarks** — `scripts/benchmark.py` gains `--repo`,
+  `--repos`, `--format markdown|json`, and cold-vs-hot graph timings.
 - **CLI** (`repograph-honest` command) with a 1:1 subcommand for every MCP
   tool: `index`, `deps`, `scan`, `check-symbol`, `check-api`, `validate`,
-  `execute`, `dead-code`, `similar`, `call-graph`, `search`, `load-package`,
-  `stats`, `choose-tool`. Output is JSON; exit codes are non-zero when
+  `execute`, `dead-code`, `similar`, `call-graph`, `impact`, `affected`,
+  `search`, `load-package`, `stats`, `choose-tool`, `init`, `uninit`,
+  `install`, `root`, `watch`. Output is JSON; exit codes are non-zero when
   issues are found so the CLI drops into CI pipelines cleanly.
 - **`REPOGRAPH_TOOLS` environment variable** now actually controls which
   tools the MCP server exposes. Defaults to `scan_file`; accepts a

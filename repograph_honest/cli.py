@@ -25,8 +25,10 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+import time
 from typing import TYPE_CHECKING, Any
 
+from repograph_honest.honest import project_binding as _binding
 from repograph_honest.mcp import tools as _tools
 
 if TYPE_CHECKING:
@@ -52,7 +54,57 @@ def _emit_issues(result: dict[str, Any], issue_key: str = "issues") -> int:
 
 
 def _cmd_index(args: argparse.Namespace) -> int:
-    return _emit(_tools.index_project(args.path, force_rebuild=args.force))
+    return _emit(
+        _tools.index_project(args.path, force_rebuild=args.force, watch=args.watch)
+    )
+
+
+def _cmd_affected(args: argparse.Namespace) -> int:
+    return _emit(_tools.affected_files(base=args.base, head=args.head, max_depth=args.depth))
+
+
+def _cmd_impact(args: argparse.Namespace) -> int:
+    return _emit(_tools.explore_impact(args.symbol, max_depth=args.depth))
+
+
+def _cmd_watch(args: argparse.Namespace) -> int:
+    """Index and keep the project fresh until interrupted (Ctrl+C)."""
+    res = _tools.index_project(args.path, force_rebuild=args.force, watch=True)
+    _emit(res)
+    if not res.get("success"):
+        return 1
+    print(f"Watching {args.path} — press Ctrl+C to stop.", file=sys.stderr)
+    try:
+        while True:
+            time.sleep(60)
+    except KeyboardInterrupt:
+        _emit(_tools.stop_watching())
+        return 0
+
+
+def _cmd_init(args: argparse.Namespace) -> int:
+    return _emit(_binding.init_project(args.path, force=args.force))
+
+
+def _cmd_uninit(args: argparse.Namespace) -> int:
+    return _emit(_binding.uninit_project(args.path))
+
+
+def _cmd_install(args: argparse.Namespace) -> int:
+    return _emit(
+        _binding.install_mcp_config(
+            path=args.path,
+            client=args.client,
+            dry_run=args.dry_run,
+        )
+    )
+
+
+def _cmd_root(args: argparse.Namespace) -> int:
+    root = _binding.find_project_root(args.path)
+    if root is None:
+        return _emit({"success": False, "error": "No project root found (no .repograph/ or .git/)"})
+    return _emit({"success": True, "root": str(root)})
 
 
 def _cmd_deps(args: argparse.Namespace) -> int:
@@ -128,7 +180,20 @@ def _build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("index", help="Build (or reuse) the project symbol index.")
     p.add_argument("path", help="Project root directory.")
     p.add_argument("--force", action="store_true", help="Force rebuild the index.")
+    p.add_argument(
+        "--watch",
+        action="store_true",
+        help="Start a background watcher that re-indexes on file changes.",
+    )
     p.set_defaults(func=_cmd_index)
+
+    p = sub.add_parser(
+        "watch",
+        help="Index a project and keep it fresh (background watcher, Ctrl+C to stop).",
+    )
+    p.add_argument("path", help="Project root directory.")
+    p.add_argument("--force", action="store_true", help="Force rebuild the index.")
+    p.set_defaults(func=_cmd_watch)
 
     p = sub.add_parser("deps", help="Load dependency APIs from requirements.txt / pyproject.toml.")
     p.add_argument("path", help="Project root directory.")
@@ -193,6 +258,20 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument("symbol", help="Symbol name to explore.")
     p.set_defaults(func=_cmd_call_graph)
 
+    p = sub.add_parser("impact", help="Compute the blast radius of a symbol.")
+    p.add_argument("symbol", help="Symbol name to analyze.")
+    p.add_argument("--depth", type=int, default=3, help="Max call-graph hops (default: 3).")
+    p.set_defaults(func=_cmd_impact)
+
+    p = sub.add_parser(
+        "affected",
+        help="Files/tests that may be affected by a git diff (from the call graph).",
+    )
+    p.add_argument("--base", default="HEAD", help="Git ref to diff against (default: HEAD).")
+    p.add_argument("--head", default=None, help="Optional second ref for base..head diffs.")
+    p.add_argument("--depth", type=int, default=4, help="Max call-graph hops (default: 4).")
+    p.set_defaults(func=_cmd_affected)
+
     p = sub.add_parser("search", help="Search project source code with a regex pattern.")
     p.add_argument("pattern", help="Regular expression to search for.")
     p.add_argument("--glob", default="*.py", help="Glob pattern for files to search.")
@@ -208,6 +287,36 @@ def _build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("choose-tool", help="Show which tool a natural-language query maps to.")
     p.add_argument("query", help="Natural-language query.")
     p.set_defaults(func=_cmd_choose_tool)
+
+    p = sub.add_parser(
+        "init",
+        help="Bind a directory as a RepoGraph-Honest project (.repograph/).",
+    )
+    p.add_argument("path", nargs="?", default=None, help="Project directory (default: cwd).")
+    p.add_argument("--force", action="store_true", help="Re-create an existing binding.")
+    p.set_defaults(func=_cmd_init)
+
+    p = sub.add_parser("uninit", help="Remove the .repograph/ project binding.")
+    p.add_argument("path", nargs="?", default=None, help="Project directory (default: cwd).")
+    p.set_defaults(func=_cmd_uninit)
+
+    p = sub.add_parser(
+        "install",
+        help="Register the MCP server with a client (Cursor, VS Code, Claude Code).",
+    )
+    p.add_argument("path", nargs="?", default=None, help="Project directory (default: cwd).")
+    p.add_argument(
+        "--client",
+        choices=["cursor", "vscode", "claude"],
+        default=None,
+        help="Only configure this client (default: all detected).",
+    )
+    p.add_argument("--dry-run", action="store_true", help="Preview changes without writing.")
+    p.set_defaults(func=_cmd_install)
+
+    p = sub.add_parser("root", help="Print the detected project root (binding or git).")
+    p.add_argument("path", nargs="?", default=None, help="Start directory (default: cwd).")
+    p.set_defaults(func=_cmd_root)
 
     return parser
 

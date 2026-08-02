@@ -48,7 +48,7 @@ def _register_tool(name: str, func: Callable, description: str) -> None:
     _TOOL_REGISTRY[name] = (func, description)
 
 
-def _mcp_index_project(root_path: str, force_rebuild: bool = False) -> dict:
+def _mcp_index_project(root_path: str, force_rebuild: bool = False, watch: bool = False) -> dict:
     """Build (or reuse) the symbol index for a project directory.
 
     Call this once before other tools. Subsequent calls return a cached index
@@ -57,8 +57,9 @@ def _mcp_index_project(root_path: str, force_rebuild: bool = False) -> dict:
     Args:
         root_path: Absolute path to the project root.
         force_rebuild: If True, discard the cache and rebuild the index.
+        watch: If True, start a background watcher that re-indexes on changes.
     """
-    logger.info("index_project(%s, force_rebuild=%s)", root_path, force_rebuild)
+    logger.info("index_project(%s, force_rebuild=%s, watch=%s)", root_path, force_rebuild, watch)
     return _tools.index_project(root_path, force_rebuild=force_rebuild)
 
 
@@ -169,6 +170,32 @@ def _mcp_explore_call_graph(symbol_name: str) -> dict:
     return _tools.explore_call_graph(symbol_name)
 
 
+def _mcp_explore_impact(symbol_name: str, max_depth: int = 3) -> dict:
+    """Compute the blast radius of a symbol: transitively impacted symbols/files.
+
+    Args:
+        symbol_name: Name of the symbol to analyze.
+        max_depth: Maximum number of call-graph hops to follow.
+    """
+    return _tools.explore_impact(symbol_name, max_depth)
+
+
+def _mcp_stop_watching() -> dict:
+    """Stop the background file watcher, if any."""
+    return _tools.stop_watching()
+
+
+def _mcp_affected_files(base: str = "HEAD", head: str | None = None, max_depth: int = 4) -> dict:
+    """Find files (especially tests) that may be affected by a git diff.
+
+    Args:
+        base: Git ref to diff against (default: HEAD).
+        head: Optional second ref; when given, diffs base..head.
+        max_depth: Maximum call-graph hops to trace.
+    """
+    return _tools.affected_files(base, head, max_depth)
+
+
 def _mcp_search_code(pattern: str, glob: str = "*.py") -> dict:
     """Search project source code with a regex pattern.
 
@@ -198,6 +225,9 @@ _ALL_TOOLS: dict[str, tuple[Callable, str]] = {
     "find_dead_code": (_mcp_find_dead_code, "Find unused symbols."),
     "find_similar_code": (_mcp_find_similar_code, "Find code clones."),
     "explore_call_graph": (_mcp_explore_call_graph, "Explore callers/callees."),
+    "explore_impact": (_mcp_explore_impact, "Blast radius of a symbol."),
+    "affected_files": (_mcp_affected_files, "Files/tests affected by a git diff."),
+    "stop_watching": (_mcp_stop_watching, "Stop the background file watcher."),
     "search_code": (_mcp_search_code, "Regex search across project files."),
     "load_package_apis": (_mcp_load_package_apis, "Load a package's API signatures."),
     "get_project_stats": (_mcp_get_project_stats, "Return index statistics."),

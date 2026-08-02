@@ -22,11 +22,15 @@ from __future__ import annotations
 
 import ast
 import logging
+import os
 import re
+import sqlite3
+import subprocess
 import threading
-from dataclasses import dataclass, field
 from pathlib import Path
 
+from repograph_honest.graph.graph_store import CallGraph, GraphCache
+from repograph_honest.graph.watcher import ProjectWatcher
 from repograph_honest.honest.router import HonestRouter
 from repograph_honest.honest.symbol_index import ProjectIndex, get_project_index
 from repograph_honest.mcp.knowledge_base import APIKnowledgeBase
@@ -62,6 +66,16 @@ _dep_kb: APIKnowledgeBase = APIKnowledgeBase()
 _router: HonestRouter | None = None
 _sandbox: SandboxExecutor = SandboxExecutor()
 _extractor: StructureExtractor = StructureExtractor()
+# In-memory call-graph cache keyed by resolved project root. The SQLite
+# GraphCache on disk is the source of truth; this is just a hot layer.
+_graph_mem_cache: dict[str, CallGraph] = {}
+
+
+def _cache_dir() -> Path:
+    """Directory for symbol/graph caches (override with REPOGRAPH_CACHE_DIR)."""
+    return Path(
+        os.environ.get("REPOGRAPH_CACHE_DIR", os.path.expanduser("~/.cache/repograph_honest"))
+    )
 
 
 # ── Internal helpers ───────────────────────────────────────────────────
@@ -147,20 +161,7 @@ def _normalize_code(text: str) -> str:
     return "\n".join(out)
 
 
-@dataclass
-class _CallGraph:
-    """Project-wide definition/reference graph.
-
-    definitions: name -> [(file, line, end_line, kind)]
-    references:  name -> [(file, line, kind, context)]
-                 where *context* is the enclosing function/class name, if any.
-    """
-
-    definitions: dict[str, list[tuple[Path, int, int, str]]] = field(default_factory=dict)
-    references: dict[str, list[tuple[Path, int, str, str | None]]] = field(default_factory=dict)
-
-
-def _build_call_graph(root: Path) -> _CallGraph:
+def _build_call_graph(root: Path) -> CallGraph:
     """Build a project-wide definition/reference graph from ASTs.
 
     Reference ``context`` is recorded as the **module-qualified** enclosing
@@ -169,7 +170,7 @@ def _build_call_graph(root: Path) -> _CallGraph:
     name (``main``) is still recorded as a secondary key for backwards
     compatibility with short-name lookups.
     """
-    graph = _CallGraph()
+    graph = CallGraph()
 
     for p, res in _parse_results_for(root).items():
         # Build a lineno -> module-qualified enclosing context map for this file.
@@ -217,7 +218,7 @@ def _build_call_graph(root: Path) -> _CallGraph:
 def _collect_refs_in(
     node: ast.AST,
     p: Path,
-    graph: _CallGraph,
+    graph: CallGraph,
     context: str | None,
     qualified_by_short: dict[str, str] | None = None,
 ) -> None:
@@ -249,7 +250,7 @@ def _collect_refs_in(
 def _record_reference(
     child: ast.AST,
     p: Path,
-    graph: _CallGraph,
+    graph: CallGraph,
     context: str | None,
 ) -> None:
     """Record a single AST node as a reference if it is a call/name/attribute."""
@@ -270,7 +271,75 @@ def _record_reference(
 
 
 # ── Tools ──────────────────────────────────────────────────────────────
-def index_project(root_path: str, force_rebuild: bool = False) -> dict:
+def _invalidate_graph_cache() -> None:
+    """Drop the in-memory call-graph cache (after re-indexing)."""
+    with _state_lock:
+        _graph_mem_cache.clear()
+
+
+def _get_call_graph(root: Path) -> CallGraph:
+    """Return a fresh call graph, reading from the SQLite cache when possible.
+
+    Falls back to a full AST rebuild and persists it to disk, so repeated graph
+    queries (call-graph, dead-code, impact, affected) stay fast on large repos.
+    """
+    with _state_lock:
+        cached = _graph_mem_cache.get(str(root))
+    if cached is not None:
+        return cached
+
+    cache = GraphCache.for_root(root, _cache_dir())
+    if cache.is_fresh(root):
+        loaded = cache.load()
+        if loaded is not None:
+            with _state_lock:
+                _graph_mem_cache[str(root)] = loaded
+            return loaded
+
+    graph = _build_call_graph(root)
+    try:
+        cache.save(graph, root)
+    except OSError:
+        logger.debug("Could not persist graph cache for %s", root)
+    with _state_lock:
+        _graph_mem_cache[str(root)] = graph
+    return graph
+
+
+_watcher: ProjectWatcher | None = None
+
+
+def _ensure_watcher(root: Path) -> None:
+    """Start a background file watcher that auto-reindexes on changes."""
+    global _watcher
+    if _watcher is not None:
+        return
+
+    def _on_change(changed: list) -> None:
+        idx = get_project_index(root, force_rebuild=False)
+        with _state_lock:
+            global _project_index, _project_root, _router
+            _project_index = idx
+            _project_root = root
+            _router = None
+            _invalidate_graph_cache()
+        logger.info("Watcher: re-indexed after %d file changes", len(changed))
+
+    _watcher = ProjectWatcher(root, _on_change).start()
+
+
+def stop_watching() -> dict:
+    """Stop the background file watcher, if any."""
+    global _watcher
+    with _state_lock:
+        if _watcher is None:
+            return {"success": True, "watching": False}
+        _watcher.stop()
+        _watcher = None
+    return {"success": True, "watching": False}
+
+
+def index_project(root_path: str, force_rebuild: bool = False, watch: bool = False) -> dict:
     """Build (or reuse) the symbol index for a project directory."""
     global _project_index, _router, _project_root
     root = Path(root_path)
@@ -282,11 +351,15 @@ def index_project(root_path: str, force_rebuild: bool = False) -> dict:
         _project_root = resolved
         _project_index = idx
         _router = None
+        _invalidate_graph_cache()
+    if watch:
+        _ensure_watcher(resolved)
     return {
         "success": True,
         "symbols_indexed": len(idx.symbols),
         "root": str(resolved),
         "cached": not force_rebuild,
+        "watching": _watcher is not None,
     }
 
 
@@ -503,11 +576,59 @@ def _builtin_names() -> set[str]:
     return set(dir(builtins))
 
 
+def _scan_non_python(p: Path) -> dict:
+    """Scan a non-Python file via the optional tree-sitter multi-language path."""
+    from repograph_honest.structure import multi_lang
+
+    lang = multi_lang.detect_language(p)
+    if lang is None:
+        return {
+            "success": False,
+            "error": f"Unsupported language for {p.suffix or 'file'}. "
+            "Python is fully supported; other languages need "
+            "'pip install repograph-honest[multi-language]'.",
+        }
+    try:
+        symbols = multi_lang.extract_symbols(p)
+    except multi_lang.TreeSitterUnavailable as exc:
+        return {
+            "success": False,
+            "error": f"{exc}. Language detected: {lang}. "
+            "Run: pip install -e '.[multi-language]'",
+        }
+    except Exception as exc:  # noqa: BLE001
+        return {"success": False, "error": f"multi-language scan failed: {exc}"}
+
+    defined = {s["name"] for s in symbols}
+    try:
+        source = p.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError) as exc:
+        return {"success": False, "error": f"cannot read file: {exc}"}
+
+    issues: list[dict] = []
+    for m in re.finditer(r"([A-Za-z_$][\w$]*)\s*\(", source):
+        name = m.group(1)
+        if name in defined or name in {"if", "for", "while", "switch", "catch", "function"}:
+            continue
+        line = source[: m.start()].count("\n") + 1
+        issues.append({"type": "undefined_call", "name": name, "line": line})
+
+    return {
+        "success": True,
+        "file": str(p),
+        "language": lang,
+        "issues": issues,
+        "defined_symbols": len(defined),
+    }
+
+
 def scan_file(file_path: str) -> dict:
     """Scan a file for potential hallucinations: undefined symbols and missing imports."""
     p = Path(file_path)
     if not p.exists():
         return {"success": False, "error": f"File not found: {file_path}"}
+    if p.suffix.lower() != ".py":
+        return _scan_non_python(p)
     try:
         res = _extractor.parse_file(p)
     except Exception as e:  # noqa: BLE001
@@ -737,7 +858,7 @@ def find_dead_code(
         return {"success": False, "error": "Project not indexed. Call index_project first."}
 
     ignore_res = [re.compile(p) for p in (ignore_patterns or [])]
-    graph = _build_call_graph(root)
+    graph = _get_call_graph(root)
 
     alive: set[str] = set(entrypoints or [])
 
@@ -838,7 +959,7 @@ def explore_call_graph(symbol_name: str) -> dict:
     if root is None:
         return {"success": False, "error": "Project not indexed. Call index_project first."}
 
-    graph = _build_call_graph(root)
+    graph = _get_call_graph(root)
 
     definitions = graph.definitions.get(symbol_name, [])
     short_name = symbol_name.split(".")[-1]
@@ -892,7 +1013,7 @@ def explore_call_graph(symbol_name: str) -> dict:
             }
         )
 
-    return {
+    result: dict = {
         "success": True,
         "symbol": symbol_name,
         "definitions": [
@@ -900,6 +1021,181 @@ def explore_call_graph(symbol_name: str) -> dict:
         ],
         "callers": callers,
         "callees": callees,
+    }
+    # Blast-radius summary: how far a change to this symbol would ripple.
+    if definitions:
+        impact = explore_impact(symbol_name, max_depth=3)
+        if impact.get("success"):
+            result["impact"] = impact["counts"]
+    return result
+
+
+def explore_impact(symbol_name: str, max_depth: int = 3) -> dict:
+    """Compute the blast radius of a symbol: transitively impacted symbols/files.
+
+    Walks the call graph in both directions (callers and callees) up to
+    ``max_depth`` hops and summarizes which symbols and files would be affected
+    if ``symbol_name`` changed.
+    """
+    with _state_lock:
+        root = _project_root
+    if root is None:
+        return {"success": False, "error": "Project not indexed. Call index_project first."}
+
+    graph = _get_call_graph(root)
+    if symbol_name not in graph.definitions:
+        return {"success": False, "error": f"Symbol not found in project: {symbol_name}"}
+
+    def _callers(name: str) -> set[str]:
+        """Symbols whose bodies reference *name* (or its short form)."""
+        short = name.split(".")[-1]
+        found: set[str] = set()
+        for ref_name, refs in graph.references.items():
+            if ref_name != name and ref_name != short:
+                continue
+            for _p, _line, _kind, context in refs:
+                if context:
+                    found.add(context)
+        return found
+
+    def _callees(name: str) -> set[str]:
+        """Symbols referenced from inside *name*'s definitions."""
+        spans = [(line, end) for _p, line, end, _kind in graph.definitions.get(name, [])]
+        if not spans:
+            return set()
+        short = name.split(".")[-1]
+        found: set[str] = set()
+        for ref_name, refs in graph.references.items():
+            for _rp, rline, _rkind, rcontext in refs:
+                if rcontext != name and rcontext != short:
+                    continue
+                if any(start <= rline <= end for start, end in spans):
+                    found.add(ref_name)
+        return found
+
+    visited: set[str] = set()
+    frontier: set[str] = {symbol_name}
+    depth_map: dict[str, int] = {}
+    depth = 0
+    while frontier and depth < max_depth:
+        depth += 1
+        nxt: set[str] = set()
+        for name in frontier:
+            if name in visited:
+                continue
+            visited.add(name)
+            depth_map[name] = depth
+            nxt.update(_callers(name))
+            nxt.update(_callees(name))
+        frontier = nxt - visited
+
+    impacted_files: set[str] = set()
+    for name in visited:
+        for p, _line, _end, _kind in graph.definitions.get(name, []):
+            impacted_files.add(str(p))
+
+    return {
+        "success": True,
+        "symbol": symbol_name,
+        "max_depth": max_depth,
+        "impacted_symbols": sorted(visited),
+        "impacted_files": sorted(impacted_files),
+        "counts": {
+            "symbols": len(visited),
+            "files": len(impacted_files),
+            "depth": max(depth_map.values(), default=0),
+        },
+    }
+
+
+def _run_git(root: Path, *args: str) -> subprocess.CompletedProcess[str] | None:
+    try:
+        return subprocess.run(
+            ["git", "-C", str(root), *args],
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+
+
+def affected_files(base: str = "HEAD", head: str | None = None, max_depth: int = 4) -> dict:
+    """Find files (especially tests) that may be affected by a git diff.
+
+    ``base`` (default ``HEAD``) is diffed against ``head`` when given, else the
+    working tree. Changed files' defined symbols are traced backwards through
+    the call graph so callers-of-callers up to ``max_depth`` hops are included.
+    """
+    with _state_lock:
+        root = _project_root
+    if root is None:
+        return {"success": False, "error": "Project not indexed. Call index_project first."}
+
+    if head:
+        proc = _run_git(root, "diff", "--name-only", base, head)
+    else:
+        proc = _run_git(root, "diff", "--name-only", base)
+    if proc is None or proc.returncode != 0:
+        err = (proc.stderr if proc else "git unavailable").strip()
+        return {"success": False, "error": f"git diff failed: {err}"}
+    changed = [line.strip() for line in proc.stdout.splitlines() if line.strip()]
+
+    graph = _get_call_graph(root)
+
+    # Symbols defined in changed files (paths are relative to the repo root).
+    # git always emits forward slashes; normalize Windows paths to match.
+    seeds: set[str] = set()
+    changed_set = {c.replace("\\", "/") for c in changed}
+    for name, locs in graph.definitions.items():
+        for p, _line, _end, _kind in locs:
+            try:
+                rel = str(p.relative_to(root)).replace("\\", "/")
+            except ValueError:
+                rel = str(p)
+            if rel in changed_set:
+                seeds.add(name)
+    if not seeds:
+        return {
+            "success": True,
+            "changed": changed,
+            "affected_files": [],
+            "affected_tests": [],
+            "propagation": 0,
+        }
+
+    # Reverse BFS: who references these symbols, transitively.
+    visited: set[str] = set()
+    frontier: set[str] = set(seeds)
+    while frontier:
+        nxt: set[str] = set()
+        for name in frontier:
+            if name in visited:
+                continue
+            visited.add(name)
+            short = name.split(".")[-1]
+            for ref_name, refs in graph.references.items():
+                if ref_name != name and ref_name != short:
+                    continue
+                for _p, _line, _kind, context in refs:
+                    if context and context not in visited:
+                        nxt.add(context)
+        frontier = nxt - visited
+        if len(visited) > 5000:  # safety valve for pathological graphs
+            break
+
+    affected: set[str] = set()
+    for name in visited:
+        for p, _line, _end, _kind in graph.definitions.get(name, []):
+            affected.add(str(p))
+
+    affected_tests = sorted(f for f in affected if "test" in f.lower())
+    return {
+        "success": True,
+        "changed": changed,
+        "affected_files": sorted(affected),
+        "affected_tests": affected_tests,
+        "propagation": len(visited) - len(seeds),
     }
 
 
@@ -915,8 +1211,35 @@ def search_code(pattern: str, glob: str = "*.py") -> dict:
     except re.error as e:
         return {"success": False, "error": f"Invalid regex: {e}"}
 
+    # FTS5 acceleration: for plain .py searches, shrink the scan to a superset
+    # of candidate files via the full-text index, then run the exact regex only
+    # on those. Results are identical to a full scan, but large repos touch
+    # far fewer files. Falls back to a full scan when FTS5 is unavailable.
+    candidates: list[Path] | None = None
+    if glob == "*.py":
+        try:
+            cache = GraphCache.for_root(root, _cache_dir())
+            if not cache.is_fresh(root):
+                # First search after a change: (re)build the graph + FTS5 index
+                # once, then every later search hits the index.
+                _get_call_graph(root)
+            if cache.is_fresh(root):
+                rel_candidates = cache.search_candidate_files(pattern)
+                if rel_candidates is not None:
+                    if not rel_candidates:
+                        return {
+                            "success": True,
+                            "pattern": pattern,
+                            "matches": [],
+                            "count": 0,
+                            "engine": "fts5",
+                        }
+                    candidates = [root / rel for rel in rel_candidates]
+        except (OSError, sqlite3.Error):
+            candidates = None
+
     matches: list[dict] = []
-    for p in root.rglob(glob):
+    for p in candidates if candidates is not None else root.rglob(glob):
         if "__pycache__" in p.parts:
             continue
         try:
@@ -933,7 +1256,13 @@ def search_code(pattern: str, glob: str = "*.py") -> dict:
                 }
             )
 
-    return {"success": True, "pattern": pattern, "matches": matches, "count": len(matches)}
+    return {
+        "success": True,
+        "pattern": pattern,
+        "matches": matches,
+        "count": len(matches),
+        "engine": "fts5" if candidates is not None else "regex",
+    }
 
 
 def choose_tool(query: str) -> dict:
