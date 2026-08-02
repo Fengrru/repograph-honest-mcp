@@ -1,7 +1,7 @@
 """Honest core: symbol indexing, routing and hallucination checks."""
 
-from repograph_honest.honest.router import HonestRouter, RouteChoice, ToolIntent
-from repograph_honest.honest.symbol_index import (
+from honestcode.honest.router import HonestRouter, RouteChoice, ToolIntent
+from honestcode.honest.symbol_index import (
     ProjectIndex,
     SymbolIndex,
     SymbolInfo,

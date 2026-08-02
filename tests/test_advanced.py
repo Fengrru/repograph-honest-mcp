@@ -6,7 +6,7 @@ from pathlib import Path  # noqa: TC003
 
 import pytest
 
-from repograph_honest.mcp.tools import (
+from honestcode.mcp.tools import (
     check_api,
     check_symbol,
     explore_call_graph,

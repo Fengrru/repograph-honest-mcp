@@ -1,5 +1,5 @@
 """
-Knowledge base of dependency APIs for RepoGraph-Honest.
+Knowledge base of dependency APIs for HonestCode.
 
 Loads API signatures from installed packages via ``pydoc`` / AST inspection
 and stores them for fast lookup during hallucination checks.

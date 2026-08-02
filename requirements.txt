@@ -1,4 +1,4 @@
-# Core runtime dependencies for the RepoGraph-Honest MCP server.
+# Core runtime dependencies for the HonestCode MCP server.
 # Lightweight: no torch / transformers / tree-sitter required — the
 # server parses Python with the standard-library `ast` module.
 mcp>=1.6.0

@@ -3,14 +3,14 @@ requires = ["setuptools>=68.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "repograph-honest-mcp"
+name = "honestcode"
 version = "0.2.0"
 description = "A lightweight MCP server that detects AI code hallucinations in real time — undefined symbols, wrong API calls, dead code, and type mismatches."
 readme = "README.md"
 requires-python = ">=3.10"
 license = "MIT"
 authors = [
-    { name = "RepoGraph-Honest Team" },
+    { name = "HonestCode Team" },
 ]
 keywords = [
     "mcp",
@@ -63,18 +63,18 @@ multi-language = [
 ]
 
 [project.scripts]
-repograph-honest-mcp = "repograph_honest.mcp.server:main"
-repograph-honest = "repograph_honest.cli:main"
+honestcode-mcp = "honestcode.mcp.server:main"
+honestcode = "honestcode.cli:main"
 
 [project.urls]
-Homepage = "https://github.com/Fengrru/repograph-honest-mcp"
-Documentation = "https://github.com/Fengrru/repograph-honest-mcp#readme"
-Repository = "https://github.com/Fengrru/repograph-honest-mcp"
-Issues = "https://github.com/Fengrru/repograph-honest-mcp/issues"
-Changelog = "https://github.com/Fengrru/repograph-honest-mcp/blob/main/CHANGELOG.md"
+Homepage = "https://github.com/Fengrru/honestcode"
+Documentation = "https://github.com/Fengrru/honestcode#readme"
+Repository = "https://github.com/Fengrru/honestcode"
+Issues = "https://github.com/Fengrru/honestcode/issues"
+Changelog = "https://github.com/Fengrru/honestcode/blob/main/CHANGELOG.md"
 
 [tool.setuptools.packages.find]
-include = ["repograph_honest*"]
+include = ["honestcode*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
@@ -102,10 +102,10 @@ ignore = [
 ]
 
 [tool.ruff.lint.isort]
-known-first-party = ["repograph_honest"]
+known-first-party = ["honestcode"]
 
 [tool.coverage.run]
-source = ["repograph_honest"]
+source = ["honestcode"]
 omit = ["tests/*"]
 
 [tool.coverage.report]

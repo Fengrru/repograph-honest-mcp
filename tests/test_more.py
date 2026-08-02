@@ -4,10 +4,10 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from repograph_honest.honest.router import HonestRouter
-from repograph_honest.honest.symbol_index import ProjectIndex, get_project_index
-from repograph_honest.mcp.knowledge_base import APIKnowledgeBase
-from repograph_honest.structure.extractor import StructureExtractor
+from honestcode.honest.router import HonestRouter
+from honestcode.honest.symbol_index import ProjectIndex, get_project_index
+from honestcode.mcp.knowledge_base import APIKnowledgeBase
+from honestcode.structure.extractor import StructureExtractor
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -123,7 +123,7 @@ def test_get_project_index_reads_disk_cache(tmp_path: Path):
     get_project_index(tmp_path, force_rebuild=True, cache_dir=cache_dir)
 
     # Clear in-memory cache to force disk read.
-    from repograph_honest.honest import symbol_index
+    from honestcode.honest import symbol_index
 
     symbol_index._index_cache.clear()
     idx = get_project_index(tmp_path, cache_dir=cache_dir)
@@ -189,7 +189,7 @@ def test_extractor_local_edge(tmp_path: Path):
 
 # ── Sandbox ────────────────────────────────────────────────────────────
 def test_sandbox_validate_snippet():
-    from repograph_honest.sandbox import SandboxExecutor
+    from honestcode.sandbox import SandboxExecutor
 
     res = SandboxExecutor().validate_snippet("print(undefined_symbol)", set())
     assert res.success is False

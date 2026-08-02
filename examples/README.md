@@ -1,6 +1,6 @@
 # Examples
 
-This directory contains short, runnable examples for using RepoGraph-Honest as
+This directory contains short, runnable examples for using HonestCode as
 a Python library.
 
 You can run any example from the repository root:

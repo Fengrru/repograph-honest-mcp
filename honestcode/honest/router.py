@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    from repograph_honest.mcp.knowledge_base import APIKnowledgeBase
+    from honestcode.mcp.knowledge_base import APIKnowledgeBase
 
 __all__ = ["ToolIntent", "RouteChoice", "HonestRouter"]
 

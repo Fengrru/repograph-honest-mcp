@@ -1,4 +1,4 @@
-"""Tests for the MCP server layer: tool registration, REPOGRAPH_TOOLS
+"""Tests for the MCP server layer: tool registration, HONESTCODE_TOOLS
 whitelist, SSE/stdio argument parsing, and shared AST utilities."""
 
 from __future__ import annotations
@@ -9,9 +9,9 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from repograph_honest.mcp import server as server_mod
-from repograph_honest.mcp.tools import check_symbol, validate_types
-from repograph_honest.structure.utils import call_base, call_name
+from honestcode.mcp import server as server_mod
+from honestcode.mcp.tools import check_symbol, validate_types
+from honestcode.structure.utils import call_base, call_name
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -34,17 +34,17 @@ def sample_project(tmp_path: Path):
 # ── Tool registry / whitelist ──────────────────────────────────────────
 def test_default_whitelist_is_scan_file_only():
     # Simulate an unset env var.
-    old = os.environ.pop("REPOGRAPH_TOOLS", None)
+    old = os.environ.pop("HONESTCODE_TOOLS", None)
     try:
         wl = server_mod._resolve_tool_whitelist()
         assert wl == {"scan_file"}
     finally:
         if old is not None:
-            os.environ["REPOGRAPH_TOOLS"] = old
+            os.environ["HONESTCODE_TOOLS"] = old
 
 
 def test_all_keyword_exposes_every_tool(monkeypatch):
-    monkeypatch.setenv("REPOGRAPH_TOOLS", "all")
+    monkeypatch.setenv("HONESTCODE_TOOLS", "all")
     wl = server_mod._resolve_tool_whitelist()
     assert "scan_file" in wl
     assert "index" in wl
@@ -53,13 +53,13 @@ def test_all_keyword_exposes_every_tool(monkeypatch):
 
 
 def test_explicit_list_includes_scan_file_implicitly(monkeypatch):
-    monkeypatch.setenv("REPOGRAPH_TOOLS", "index,check_symbol")
+    monkeypatch.setenv("HONESTCODE_TOOLS", "index,check_symbol")
     wl = server_mod._resolve_tool_whitelist()
     assert wl == {"scan_file", "index", "check_symbol"}
 
 
 def test_unknown_tool_names_ignored(monkeypatch):
-    monkeypatch.setenv("REPOGRAPH_TOOLS", "scan_file,nonexistent_xyz")
+    monkeypatch.setenv("HONESTCODE_TOOLS", "scan_file,nonexistent_xyz")
     wl = server_mod._resolve_tool_whitelist()
     assert "nonexistent_xyz" not in wl
     assert "scan_file" in wl
@@ -91,7 +91,7 @@ def test_registry_contains_all_tools():
 # ── Tool wrappers (end-to-end through the registry) ────────────────────
 def test_scan_file_wrapper(sample_project: Path, monkeypatch):
     # Ensure only scan_file is exposed; the wrapper should still work.
-    monkeypatch.delenv("REPOGRAPH_TOOLS", raising=False)
+    monkeypatch.delenv("HONESTCODE_TOOLS", raising=False)
     bad = sample_project / "bad.py"
     bad.write_text("nonexistent_func()\n", encoding="utf-8")
     server_mod._mcp_index_project(str(sample_project))
@@ -163,7 +163,7 @@ def test_validate_types_bad_builtin_kwarg():
 
 
 def test_check_symbol_before_index(monkeypatch):
-    monkeypatch.setattr("repograph_honest.mcp.tools._project_index", None)
+    monkeypatch.setattr("honestcode.mcp.tools._project_index", None)
     res = check_symbol("anything")
     assert res["success"] is False
     assert "indexed" in res["error"]

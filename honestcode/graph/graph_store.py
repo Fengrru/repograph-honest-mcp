@@ -44,9 +44,7 @@ class CallGraph:
 
 def _python_files(root: Path) -> list[Path]:
     return sorted(
-        p
-        for p in root.rglob("*.py")
-        if not p.name.startswith(".") and "__pycache__" not in p.parts
+        p for p in root.rglob("*.py") if not p.name.startswith(".") and "__pycache__" not in p.parts
     )
 
 

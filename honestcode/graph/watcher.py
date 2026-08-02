@@ -51,7 +51,7 @@ class ProjectWatcher:
         on_change,
         debounce: float = 2.0,
         poll_interval: float = 0.5,
-        name: str = "repograph-watcher",
+        name: str = "honestcode-watcher",
     ) -> None:
         self.root = Path(root)
         self.on_change = on_change

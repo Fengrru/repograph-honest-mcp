@@ -1,23 +1,23 @@
 """
-Command-line interface for RepoGraph-Honest.
+Command-line interface for HonestCode.
 
 Every MCP tool has a CLI equivalent so the same capabilities can be used
 from scripts, CI pipelines, and non-MCP harnesses without launching a
 server process.
 
 Usage:
-    repograph-honest index /path/to/project
-    repograph-honest deps /path/to/project
-    repograph-honest scan src/main.py
-    repograph-honest check-symbol pkg.core.helper
-    repograph-honest check-api pandas.read_csv
-    repograph-honest validate "for x in None: pass"
-    repograph-honest dead-code --entrypoints pkg.cli.main
-    repograph-honest search "def \\w+_helper"
-    repograph-honest call-graph pkg.core.helper
-    repograph-honest similar --threshold 0.85
-    repograph-honest stats
-    repograph-honest choose-tool "is my_symbol defined"
+    honestcode index /path/to/project
+    honestcode deps /path/to/project
+    honestcode scan src/main.py
+    honestcode check-symbol pkg.core.helper
+    honestcode check-api pandas.read_csv
+    honestcode validate "for x in None: pass"
+    honestcode dead-code --entrypoints pkg.cli.main
+    honestcode search "def \\w+_helper"
+    honestcode call-graph pkg.core.helper
+    honestcode similar --threshold 0.85
+    honestcode stats
+    honestcode choose-tool "is my_symbol defined"
 """
 
 from __future__ import annotations
@@ -28,8 +28,8 @@ import sys
 import time
 from typing import TYPE_CHECKING, Any
 
-from repograph_honest.honest import project_binding as _binding
-from repograph_honest.mcp import tools as _tools
+from honestcode.honest import project_binding as _binding
+from honestcode.mcp import tools as _tools
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -54,9 +54,7 @@ def _emit_issues(result: dict[str, Any], issue_key: str = "issues") -> int:
 
 
 def _cmd_index(args: argparse.Namespace) -> int:
-    return _emit(
-        _tools.index_project(args.path, force_rebuild=args.force, watch=args.watch)
-    )
+    return _emit(_tools.index_project(args.path, force_rebuild=args.force, watch=args.watch))
 
 
 def _cmd_affected(args: argparse.Namespace) -> int:
@@ -103,7 +101,9 @@ def _cmd_install(args: argparse.Namespace) -> int:
 def _cmd_root(args: argparse.Namespace) -> int:
     root = _binding.find_project_root(args.path)
     if root is None:
-        return _emit({"success": False, "error": "No project root found (no .repograph/ or .git/)"})
+        return _emit(
+            {"success": False, "error": "No project root found (no .honestcode/ or .git/)"}
+        )
     return _emit({"success": True, "root": str(root)})
 
 
@@ -172,8 +172,8 @@ def _cmd_choose_tool(args: argparse.Namespace) -> int:
 
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        prog="repograph-honest",
-        description="RepoGraph-Honest CLI — verify AI-generated code against your project.",
+        prog="honestcode",
+        description="HonestCode CLI — verify AI-generated code against your project.",
     )
     sub = parser.add_subparsers(dest="command", required=True, metavar="COMMAND")
 
@@ -290,13 +290,13 @@ def _build_parser() -> argparse.ArgumentParser:
 
     p = sub.add_parser(
         "init",
-        help="Bind a directory as a RepoGraph-Honest project (.repograph/).",
+        help="Bind a directory as a HonestCode project (.honestcode/).",
     )
     p.add_argument("path", nargs="?", default=None, help="Project directory (default: cwd).")
     p.add_argument("--force", action="store_true", help="Re-create an existing binding.")
     p.set_defaults(func=_cmd_init)
 
-    p = sub.add_parser("uninit", help="Remove the .repograph/ project binding.")
+    p = sub.add_parser("uninit", help="Remove the .honestcode/ project binding.")
     p.add_argument("path", nargs="?", default=None, help="Project directory (default: cwd).")
     p.set_defaults(func=_cmd_uninit)
 

@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **Project renamed to HonestCode** — the package, CLI, and environment
+  variables were renamed for a distinct brand identity (no longer riding on
+  the "CodeGraph" family name):
+  - PyPI package `repograph-honest-mcp` → **`honestcode`**
+  - Python module `repograph_honest` → **`honestcode`**
+  - CLI commands `repograph-honest` / `repograph-honest-mcp` →
+    **`honestcode`** / **`honestcode-mcp`**
+  - Environment variables `REPOGRAPH_*` → **`HONESTCODE_*`**
+  - Project binding directory `.repograph/` → **`.honestcode/`**
+  - GitHub repository `Fengrru/repograph-honest-mcp` → **`Fengrru/honestcode`**
+
 ### Added
 
 - **Persistent call graph (SQLite)** — `graph/graph_store.py` persists the
@@ -26,25 +39,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **File watcher** — zero-dependency polling watcher (`graph/watcher.py`)
   with debounce; `index_project(watch=True)`, CLI `watch` subcommand, and
   `stop_watching` tool keep the index fresh automatically.
-- **Project binding & client install** — `repograph-honest init` /
-  `uninit` / `install` / `root`: `.repograph/` binding directory plus
+- **Project binding & client install** — `honestcode init` /
+  `uninit` / `install` / `root`: `.honestcode/` binding directory plus
   auto-configuration of Cursor, VS Code and Claude Code MCP configs.
-- **Multi-language support (optional)** — `repograph-honest[multi-language]`
+- **Multi-language support (optional)** — `honestcode[multi-language]`
   extras with tree-sitter symbol extraction for JS/TS/Go/Rust/Java;
   `scan_file` handles non-Python files when installed, and degrades with a
   clear message otherwise.
 - **External-repo benchmarks** — `scripts/benchmark.py` gains `--repo`,
   `--repos`, `--format markdown|json`, and cold-vs-hot graph timings.
-- **CLI** (`repograph-honest` command) with a 1:1 subcommand for every MCP
+- **CLI** (`honestcode` command) with a 1:1 subcommand for every MCP
   tool: `index`, `deps`, `scan`, `check-symbol`, `check-api`, `validate`,
   `execute`, `dead-code`, `similar`, `call-graph`, `impact`, `affected`,
   `search`, `load-package`, `stats`, `choose-tool`, `init`, `uninit`,
   `install`, `root`, `watch`. Output is JSON; exit codes are non-zero when
   issues are found so the CLI drops into CI pipelines cleanly.
-- **`REPOGRAPH_TOOLS` environment variable** now actually controls which
+- **`HONESTCODE_TOOLS` environment variable** now actually controls which
   tools the MCP server exposes. Defaults to `scan_file`; accepts a
   comma-separated list or `all`. Unknown names are ignored with a warning.
-- **SSE transport** for the MCP server (`repograph-honest-mcp --transport
+- **SSE transport** for the MCP server (`honestcode-mcp --transport
   sse --host 0.0.0.0 --port 8000`), matching the CHANGELOG claim.
 - False-positive regression tests: `scan_file` verified to stay silent on
   all builtins (any/all/frozenset/id/hash/ord/chr/pow/...), `self.method()`,
@@ -77,7 +90,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   is no native parser to install. `tree-sitter` remains on the roadmap for
   future multi-language support.
 - `[project.scripts]` now declares two entry points:
-  `repograph-honest-mcp` (MCP server) and `repograph-honest` (CLI).
+  `honestcode-mcp` (MCP server) and `honestcode` (CLI).
 - README architecture diagram and module layout updated to reflect the
   `ast`-based extractor and the new `cli.py` module.
 
@@ -85,7 +98,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- Initial open-source release of RepoGraph-Honest MCP Server.
+- Initial open-source release of HonestCode MCP Server.
 - **Indexing tools**: `index_project`, `load_project_deps`, `load_package_apis`, `get_project_stats`
   - Build module-qualified project symbol indices with content-hash caching.
   - Parse `requirements.txt` and `pyproject.toml` to load dependency API signatures.
@@ -103,7 +116,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Routing**: `choose_tool` natural-language query to tool mapping.
 - MCP server with `stdio` and `SSE` transport support.
 - Thread-safe global state protected by `RLock`.
-- Content-hash based index caching in `~/.cache/repograph_honest/`.
+- Content-hash based index caching in `~/.cache/honestcode/`.
 - SQLite serialization support for project indices.
 - 4 example scripts demonstrating library usage.
 - CI pipeline on GitHub Actions (3 OS x 3 Python versions).

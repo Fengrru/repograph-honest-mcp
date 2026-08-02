@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from repograph_honest.mcp.tools import index_project, scan_file
+from honestcode.mcp.tools import index_project, scan_file
 
 if TYPE_CHECKING:
     from pathlib import Path

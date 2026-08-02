@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import sys
 
-from repograph_honest.mcp.tools import find_dead_code, index_project
+from honestcode.mcp.tools import find_dead_code, index_project
 
 
 def main(project_root: str) -> None:

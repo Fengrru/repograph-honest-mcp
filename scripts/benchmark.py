@@ -1,4 +1,4 @@
-"""Benchmark RepoGraph-Honest operations on real projects.
+"""Benchmark HonestCode operations on real projects.
 
 Run from the repository root:
 
@@ -32,8 +32,8 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from repograph_honest.honest.symbol_index import get_project_index  # noqa: E402
-from repograph_honest.mcp.tools import (  # noqa: E402
+from honestcode.honest.symbol_index import get_project_index  # noqa: E402
+from honestcode.mcp.tools import (  # noqa: E402
     check_api,
     explore_call_graph,
     find_dead_code,
@@ -43,7 +43,7 @@ from repograph_honest.mcp.tools import (  # noqa: E402
     scan_file,
     search_code,
 )
-from repograph_honest.structure.extractor import StructureExtractor  # noqa: E402
+from honestcode.structure.extractor import StructureExtractor  # noqa: E402
 
 
 def _time(fn, repeat=5):
@@ -108,9 +108,7 @@ def run_benchmark(target: Path, repeat: int) -> dict:
     if py_files:
         scan_target = py_files[0]
         StructureExtractor().parse_file(scan_target)
-        results["scan_ms"] = _time(
-            lambda: scan_file(str(scan_target)), repeat=repeat
-        )[0]
+        results["scan_ms"] = _time(lambda: scan_file(str(scan_target)), repeat=repeat)[0]
 
     load_package_apis("math")
     results["check_api_ms"] = _time(lambda: check_api("math.sqrt"), repeat=repeat)[0]
@@ -119,20 +117,18 @@ def run_benchmark(target: Path, repeat: int) -> dict:
     sym = next((s for s in symbols if not s.startswith("_")), symbols[0] if symbols else None)
     if sym:
         # Cold: force a graph cache miss, then measure a hot cache hit.
-        from repograph_honest.mcp.tools import _get_call_graph, _invalidate_graph_cache
+        from honestcode.mcp.tools import _get_call_graph, _invalidate_graph_cache
 
         _invalidate_graph_cache()
         results["graph_cold_ms"] = _time(lambda: _get_call_graph(target), repeat=1)[0]
-        results["explore_cg_ms"] = _time(
-            lambda: explore_call_graph(sym), repeat=repeat
-        )[0]
+        results["explore_cg_ms"] = _time(lambda: explore_call_graph(sym), repeat=repeat)[0]
 
     results["dead_code_ms"] = _time(
         lambda: find_dead_code(include_tests=True), repeat=min(repeat, 3)
     )[0]
-    results["similar_ms"] = _time(
-        lambda: find_similar_code(threshold=0.85), repeat=min(repeat, 3)
-    )[0]
+    results["similar_ms"] = _time(lambda: find_similar_code(threshold=0.85), repeat=min(repeat, 3))[
+        0
+    ]
     results["search_ms"] = _time(lambda: search_code(r"def \w+"), repeat=repeat)[0]
     return results
 
@@ -142,7 +138,7 @@ def _fmt(value: float | None) -> str:
 
 
 def render_text(results: list[dict]) -> str:
-    lines = ["# RepoGraph-Honest benchmark"]
+    lines = ["# HonestCode benchmark"]
     for r in results:
         lines.append(f"\n## {r['target']}")
         lines.append(f"- files: {r['py_files']}, loc: {r['loc']}, symbols: {r['symbols']}")
@@ -198,7 +194,7 @@ def render_markdown(results: list[dict]) -> str:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Benchmark RepoGraph-Honest.")
+    parser = argparse.ArgumentParser(description="Benchmark HonestCode.")
     parser.add_argument(
         "--target",
         default=str(ROOT),
@@ -230,7 +226,7 @@ def main() -> int:
 
     results: list[dict] = []
     if repos:
-        with tempfile.TemporaryDirectory(prefix="repograph-bench-") as td:
+        with tempfile.TemporaryDirectory(prefix="honestcode-bench-") as td:
             for ref in repos:
                 url = ref if ref.startswith(("http", "git@")) else f"https://github.com/{ref}"
                 name = ref.rstrip("/").split("/")[-1].removesuffix(".git")

@@ -6,7 +6,7 @@ import sys
 import tempfile
 from pathlib import Path
 
-from repograph_honest.mcp.tools import index_project, scan_file, validate_types
+from honestcode.mcp.tools import index_project, scan_file, validate_types
 
 
 def main(project_root: str) -> None:

@@ -15,8 +15,8 @@ from __future__ import annotations
 import ast
 from pathlib import Path
 
-from repograph_honest.structure.relations import ParseResult, StructEdge
-from repograph_honest.structure.utils import call_name
+from honestcode.structure.relations import ParseResult, StructEdge
+from honestcode.structure.utils import call_name
 
 __all__ = ["StructureExtractor"]
 
@@ -226,7 +226,7 @@ class StructureExtractor:
         """Return a list of obvious issues in a single file.
 
         Kept for backwards compatibility; prefer the AST-based scan in
-        ``repograph_honest.mcp.tools`` for richer diagnostics.
+        ``honestcode.mcp.tools`` for richer diagnostics.
         """
         p = Path(file_path)
         res = self.parse_file(p)

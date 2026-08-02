@@ -1,21 +1,21 @@
 """
-RepoGraph-Honest MCP Server.
+HonestCode MCP Server.
 
 A Model Context Protocol server that exposes hallucination-detection tools
 so any MCP-compatible client (Cursor, Claude Desktop, VS Code, etc.) can
 verify generated code against the real project structure and dependencies.
 
 Run with:
-    python -m repograph_honest.mcp.server            # stdio (default)
-    python -m repograph_honest.mcp.server --sse       # SSE transport
-    python -m repograph_honest.mcp.server --sse --host 0.0.0.0 --port 8000
+    python -m honestcode.mcp.server            # stdio (default)
+    python -m honestcode.mcp.server --sse       # SSE transport
+    python -m honestcode.mcp.server --sse --host 0.0.0.0 --port 8000
 
-Tool visibility is controlled by the ``REPOGRAPH_TOOLS`` environment variable.
-By default only ``scan_file`` is exposed; set ``REPOGRAPH_TOOLS`` to a
+Tool visibility is controlled by the ``HONESTCODE_TOOLS`` environment variable.
+By default only ``scan_file`` is exposed; set ``HONESTCODE_TOOLS`` to a
 comma-separated list of tool names (or ``all``) to expose more:
 
-    export REPOGRAPH_TOOLS=index,check_symbol,check_api,validate_types
-    export REPOGRAPH_TOOLS=all
+    export HONESTCODE_TOOLS=index,check_symbol,check_api,validate_types
+    export HONESTCODE_TOOLS=all
 """
 
 from __future__ import annotations
@@ -28,18 +28,18 @@ from typing import TYPE_CHECKING
 
 from mcp.server.fastmcp import FastMCP
 
-from repograph_honest.mcp import tools as _tools
+from honestcode.mcp import tools as _tools
 
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-logging.basicConfig(level=os.environ.get("REPOGRAPH_LOG_LEVEL", "INFO"))
-logger = logging.getLogger("repograph_honest.mcp")
+logging.basicConfig(level=os.environ.get("HONESTCODE_LOG_LEVEL", "INFO"))
+logger = logging.getLogger("honestcode.mcp")
 
-mcp = FastMCP("repograph-honest")
+mcp = FastMCP("honestcode")
 
 # Registry of (tool_name -> wrapper_function, description).
-# Wrappers are registered lazily based on the REPOGRAPH_TOOLS whitelist.
+# Wrappers are registered lazily based on the HONESTCODE_TOOLS whitelist.
 _TOOL_REGISTRY: dict[str, tuple[Callable, str]] = {}
 
 
@@ -212,7 +212,7 @@ def _mcp_choose_tool(query: str) -> dict:
 
 
 # ── Tool registry table ────────────────────────────────────────────────
-# Maps the public tool name (used by MCP clients and the REPOGRAPH_TOOLS
+# Maps the public tool name (used by MCP clients and the HONESTCODE_TOOLS
 # env var) to its wrapper function and short description.
 _ALL_TOOLS: dict[str, tuple[Callable, str]] = {
     "scan_file": (_mcp_scan_file, "Scan a file for undefined calls and API issues."),
@@ -241,12 +241,12 @@ _PRIMARY_TOOL = "scan_file"
 def _resolve_tool_whitelist() -> set[str]:
     """Resolve which tool names to expose on this server.
 
-    Reads ``REPOGRAPH_TOOLS``. If unset, only the primary tool
+    Reads ``HONESTCODE_TOOLS``. If unset, only the primary tool
     (``scan_file``) is exposed. ``all`` exposes every tool. Otherwise the
     value is treated as a comma-separated list of names; unknown names are
     ignored with a warning.
     """
-    raw = os.environ.get("REPOGRAPH_TOOLS", "").strip()
+    raw = os.environ.get("HONESTCODE_TOOLS", "").strip()
     if not raw:
         return {_PRIMARY_TOOL}
 
@@ -256,7 +256,7 @@ def _resolve_tool_whitelist() -> set[str]:
     requested = {t.strip() for t in raw.split(",") if t.strip()}
     unknown = requested - set(_ALL_TOOLS.keys())
     for name in unknown:
-        logger.warning("REPOGRAPH_TOOLS: unknown tool '%s' ignored", name)
+        logger.warning("HONESTCODE_TOOLS: unknown tool '%s' ignored", name)
     # The primary tool is always included even if not explicitly listed.
     requested.add(_PRIMARY_TOOL)
     return requested & set(_ALL_TOOLS.keys())
@@ -284,8 +284,8 @@ def _register_tools() -> None:
 
 def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(
-        prog="repograph-honest-mcp",
-        description="RepoGraph-Honest MCP server.",
+        prog="honestcode-mcp",
+        description="HonestCode MCP server.",
     )
     parser.add_argument(
         "--transport",
@@ -301,7 +301,7 @@ def main(argv: list[str] | None = None) -> None:
 
     whitelist = _resolve_tool_whitelist()
     logger.info(
-        "Starting RepoGraph-Honest MCP server (transport=%s, tools=%s)",
+        "Starting HonestCode MCP server (transport=%s, tools=%s)",
         args.transport,
         sorted(whitelist),
     )

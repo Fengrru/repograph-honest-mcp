@@ -14,7 +14,7 @@ import os
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
-from repograph_honest.structure.extractor import StructureExtractor
+from honestcode.structure.extractor import StructureExtractor
 
 logger = logging.getLogger(__name__)
 
@@ -216,7 +216,7 @@ def get_project_index(
     """Return (and cache) the project index for *root*."""
     root = Path(root)
     resolved = root.resolve()
-    cache_dir = Path(cache_dir or os.path.expanduser("~/.cache/repograph_honest"))
+    cache_dir = Path(cache_dir or os.path.expanduser("~/.cache/honestcode"))
     cache_dir.mkdir(parents=True, exist_ok=True)
     cache_path = cache_dir / f"{resolved.name}_{_stable_hash(str(resolved))}.json"
 

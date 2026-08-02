@@ -101,7 +101,7 @@ jobs:
 
       - name: Verify publication on PyPI
         run: |
-          PKG="repograph-honest-mcp"
+          PKG="honestcode"
           VER="${{ steps.ver.outputs.version }}"
           for i in 1 2 3 4 5 6; do
             if curl -fsS "https://pypi.org/pypi/$PKG/json" 2>/dev/null | grep -q "\"$VER\""; then

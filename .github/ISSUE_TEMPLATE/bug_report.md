@@ -29,7 +29,7 @@ What actually happened, including any error messages or logs.
 
 - OS: [e.g. Ubuntu 22.04, Windows 11, macOS 14]
 - Python version: [e.g. 3.12.1]
-- RepoGraph-Honest version: [e.g. 0.1.0]
+- HonestCode version: [e.g. 0.1.0]
 - MCP client: [e.g. Cursor, Claude Desktop]
 
 ## Additional context

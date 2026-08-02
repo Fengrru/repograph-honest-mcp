@@ -4,7 +4,7 @@ Python remains the fully supported language (stdlib ``ast``). For JavaScript,
 TypeScript and a few other popular languages, symbol extraction is available
 when the optional extras are installed::
 
-    pip install -e "repograph-honest[multi-language]"
+    pip install -e "honestcode[multi-language]"
 
 Everything degrades gracefully: without tree-sitter, ``is_supported`` still
 recognizes the file by extension, but ``extract_symbols`` raises
@@ -124,9 +124,7 @@ def _load_language(name: str) -> object:  # pragma: no cover - requires optional
 def _query_for(name: str, Language) -> object:  # pragma: no cover - requires optional extras
     if name in _QUERIES:
         return _QUERIES[name]
-    parts = [
-        f"({node} name: (identifier) @name.{kind})" for node, kind in _SYMBOL_RULES[name]
-    ]
+    parts = [f"({node} name: (identifier) @name.{kind})" for node, kind in _SYMBOL_RULES[name]]
     query = Language.query(" ".join(parts))
     _QUERIES[name] = query
     return query

@@ -1,4 +1,4 @@
-"""Persistent graph storage for RepoGraph-Honest.
+"""Persistent graph storage for HonestCode.
 
 The call graph (definitions + references) is expensive to rebuild — it needs
 an AST pass over every source file. ``graph_store.GraphCache`` persists it to
@@ -7,7 +7,7 @@ re-parsing the project on every call, and a FTS5 virtual table backs fast
 full-text search.
 """
 
-from repograph_honest.graph.graph_store import CallGraph, GraphCache
-from repograph_honest.graph.watcher import ProjectWatcher
+from honestcode.graph.graph_store import CallGraph, GraphCache
+from honestcode.graph.watcher import ProjectWatcher
 
 __all__ = ["CallGraph", "GraphCache", "ProjectWatcher"]

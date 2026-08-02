@@ -13,14 +13,14 @@ If you discover a security issue, please email the maintainers directly rather
 than opening a public issue. We will respond as quickly as possible and work
 with you to assess and address the problem responsibly.
 
-**Email:** security@repograph-honest.example (replace with a real address when
+**Email:** security@honestcode.example (replace with a real address when
 available).
 
 Please include:
 
 - A description of the vulnerability.
 - Steps to reproduce or a proof-of-concept.
-- The version of RepoGraph-Honest you are using.
+- The version of HonestCode you are using.
 - Your Python version and operating system.
 
 ## Sandbox Security Note
@@ -33,7 +33,7 @@ such as a container or dedicated virtual machine.
 
 ## Scope
 
-This security policy applies to the official `repograph-honest-mcp` package
+This security policy applies to the official `honestcode` package
 distributed via PyPI and the source code in this repository.
 
 ## Disclosure Policy

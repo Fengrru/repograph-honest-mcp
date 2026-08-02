@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from repograph_honest.cli import main as cli_main
+from honestcode.cli import main as cli_main
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -198,9 +198,9 @@ def test_cli_unknown_command_errors():
 
 
 def test_cli_entry_point_installed():
-    """The `repograph-honest` console script must be declared and importable."""
+    """The `honestcode` console script must be declared and importable."""
     # We don't actually shell out (would need install); we verify the module
     # exposes a main() callable that argparse can drive.
-    from repograph_honest.cli import main
+    from honestcode.cli import main
 
     assert callable(main)

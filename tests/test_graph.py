@@ -9,11 +9,11 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from repograph_honest.cli import main as cli_main
-from repograph_honest.graph.graph_store import CallGraph, GraphCache
-from repograph_honest.graph.watcher import ProjectWatcher
-from repograph_honest.honest import project_binding as binding
-from repograph_honest.mcp import tools as _tools
+from honestcode.cli import main as cli_main
+from honestcode.graph.graph_store import CallGraph, GraphCache
+from honestcode.graph.watcher import ProjectWatcher
+from honestcode.honest import project_binding as binding
+from honestcode.mcp import tools as _tools
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -24,8 +24,8 @@ pytestmark = pytest.mark.usefixtures("tmp_cache_dir")
 @pytest.fixture
 def tmp_cache_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     cache = tmp_path / "cache"
-    monkeypatch.setenv("REPOGRAPH_CACHE_DIR", str(cache))
-    monkeypatch.setenv("REPOGRAPH_INDEX_DIR", str(tmp_path / "index"))
+    monkeypatch.setenv("HONESTCODE_CACHE_DIR", str(cache))
+    monkeypatch.setenv("HONESTCODE_INDEX_DIR", str(tmp_path / "index"))
     yield cache
 
 
@@ -61,10 +61,13 @@ def _run_cli(argv: list[str]) -> tuple[int, dict]:
 
 # ── GraphCache persistence -------------------------------------------------
 
+
 def test_graph_cache_roundtrip(tmp_cache_dir: Path, sample_project: Path):
     graph = CallGraph(
         definitions={"pkg.core.helper": [(sample_project / "pkg" / "core.py", 1, 2, "function")]},
-        references={"pkg.core.helper": [(sample_project / "pkg" / "core.py", 5, "call", "pkg.core.main")]},
+        references={
+            "pkg.core.helper": [(sample_project / "pkg" / "core.py", 5, "call", "pkg.core.main")]
+        },
     )
     cache = GraphCache.for_root(sample_project, tmp_cache_dir)
     cache.save(graph, sample_project)
@@ -95,6 +98,7 @@ def test_graph_cache_load_missing(tmp_cache_dir: Path, sample_project: Path):
 
 # ── search_code FTS5 acceleration ------------------------------------------
 
+
 def test_search_code_uses_fts5(tmp_cache_dir: Path, sample_project: Path):
     _tools.index_project(str(sample_project), force_rebuild=True)
     res = _tools.search_code(r"helper")
@@ -108,6 +112,7 @@ def test_search_code_uses_fts5(tmp_cache_dir: Path, sample_project: Path):
 
 
 # ── explore_impact ----------------------------------------------------------
+
 
 def test_explore_impact(tmp_cache_dir: Path, sample_project: Path):
     _tools.index_project(str(sample_project), force_rebuild=True)
@@ -134,6 +139,7 @@ def test_call_graph_includes_impact_summary(tmp_cache_dir: Path, sample_project:
 
 # ── affected_files ----------------------------------------------------------
 
+
 @pytest.fixture
 def git_project(tmp_path: Path) -> Path:
     project = tmp_path / "repo"
@@ -149,8 +155,12 @@ def git_project(tmp_path: Path) -> Path:
         encoding="utf-8",
     )
     # Minimal repo with user identity to satisfy git.
-    env = {"GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@t", "GIT_COMMITTER_NAME": "t",
-           "GIT_COMMITTER_EMAIL": "t@t"}
+    env = {
+        "GIT_AUTHOR_NAME": "t",
+        "GIT_AUTHOR_EMAIL": "t@t",
+        "GIT_COMMITTER_NAME": "t",
+        "GIT_COMMITTER_EMAIL": "t@t",
+    }
     for cmd in [
         ["git", "init", "-q"],
         ["git", "add", "-A"],
@@ -183,6 +193,7 @@ def test_affected_files_needs_index(tmp_cache_dir: Path, monkeypatch: pytest.Mon
 
 # ── ProjectWatcher ----------------------------------------------------------
 
+
 def test_watcher_fires_after_debounce(tmp_path: Path):
     project = tmp_path / "watched"
     project.mkdir()
@@ -205,16 +216,17 @@ def test_watcher_fires_after_debounce(tmp_path: Path):
 
 # ── project binding ---------------------------------------------------------
 
+
 def test_init_uninit_root(tmp_path: Path):
     res = binding.init_project(str(tmp_path))
     assert res["success"] and res["bound"]
-    assert (tmp_path / ".repograph" / "config.json").exists()
+    assert (tmp_path / ".honestcode" / "config.json").exists()
 
     assert binding.find_project_root(str(tmp_path)) == tmp_path.resolve()
 
     res2 = binding.uninit_project(str(tmp_path))
     assert res2["success"]
-    assert not (tmp_path / ".repograph").exists()
+    assert not (tmp_path / ".honestcode").exists()
     assert binding.find_project_root(str(tmp_path)) is None
 
 
@@ -229,10 +241,11 @@ def test_install_writes_vscode_config(tmp_path: Path):
     res = binding.install_mcp_config(path=str(tmp_path), client="vscode")
     assert res["success"]
     config = json.loads((tmp_path / ".vscode" / "mcp.json").read_text(encoding="utf-8"))
-    assert "repograph-honest" in config["servers"]
+    assert "honestcode" in config["servers"]
 
 
 # ── CLI: new subcommands ----------------------------------------------------
+
 
 def test_cli_impact(sample_project: Path):
     _tools.index_project(str(sample_project), force_rebuild=True)
@@ -260,8 +273,9 @@ def test_cli_watch_accepts_flag(sample_project: Path):
 
 # ── multi-language scan degradation -----------------------------------------
 
+
 def test_scan_js_without_tree_sitter(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
-    from repograph_honest.structure import multi_lang
+    from honestcode.structure import multi_lang
 
     def _boom():
         raise multi_lang.TreeSitterUnavailable("tree-sitter is not installed")
@@ -284,6 +298,7 @@ def test_scan_unknown_extension(tmp_path: Path):
 
 
 # ── stop_watching -----------------------------------------------------------
+
 
 def test_stop_watching_noop():
     res = _tools.stop_watching()

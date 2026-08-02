@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from repograph_honest.mcp.tools import check_api, load_package_apis
+from honestcode.mcp.tools import check_api, load_package_apis
 
 
 def main() -> None:

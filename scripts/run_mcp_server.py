@@ -1,5 +1,5 @@
 """
-Launch the RepoGraph-Honest MCP server.
+Launch the HonestCode MCP server.
 
 Usage:
     python scripts/run_mcp_server.py
@@ -20,11 +20,11 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from repograph_honest.mcp.server import mcp  # noqa: E402
+from honestcode.mcp.server import mcp  # noqa: E402
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="RepoGraph-Honest MCP Server")
+    parser = argparse.ArgumentParser(description="HonestCode MCP Server")
     parser.add_argument(
         "--transport",
         choices=["stdio", "sse"],

@@ -4,10 +4,10 @@ from __future__ import annotations
 
 from pathlib import Path  # noqa: TC003
 
-from repograph_honest.honest.router import HonestRouter, ToolIntent
-from repograph_honest.honest.symbol_index import ProjectIndex, get_project_index
-from repograph_honest.sandbox import SandboxExecutor
-from repograph_honest.structure.extractor import StructureExtractor
+from honestcode.honest.router import HonestRouter, ToolIntent
+from honestcode.honest.symbol_index import ProjectIndex, get_project_index
+from honestcode.sandbox import SandboxExecutor
+from honestcode.structure.extractor import StructureExtractor
 
 
 # ── Sandbox ────────────────────────────────────────────────────────────

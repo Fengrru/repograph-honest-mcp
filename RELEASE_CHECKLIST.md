@@ -1,12 +1,12 @@
 # Release checklist
 
-Use this checklist when publishing a new version of RepoGraph-Honest.
+Use this checklist when publishing a new version of HonestCode.
 
 ## Pre-release
 
 - [ ] All tests pass locally: `pytest`
-- [ ] Lint passes: `ruff check repograph_honest tests scripts examples`
-- [ ] Format check passes: `ruff format --check repograph_honest tests scripts examples`
+- [ ] Lint passes: `ruff check honestcode tests scripts examples`
+- [ ] Format check passes: `ruff format --check honestcode tests scripts examples`
 - [ ] Pre-commit passes: `pre-commit run --all-files`
 - [ ] Wheel builds cleanly: `python -m build --wheel`
 - [ ] `pyproject.toml` version is bumped (single source of truth).
@@ -40,6 +40,6 @@ twine upload dist/*
 
 ## Post-release
 
-- [ ] Verify `pip install repograph-honest-mcp` works in a fresh environment.
-- [ ] Verify the installed CLI works: `repograph-honest-mcp --help`.
+- [ ] Verify `pip install honestcode` works in a fresh environment.
+- [ ] Verify the installed CLI works: `honestcode-mcp --help`.
 - [ ] Announce the release in relevant channels.

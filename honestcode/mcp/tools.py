@@ -1,5 +1,5 @@
 """
-Tool implementations for the RepoGraph-Honest MCP server.
+Tool implementations for the HonestCode MCP server.
 
 Each function is decorated with @mcp.tool() in server.py. They provide the
 hallucination-detection capabilities exposed to MCP clients:
@@ -29,15 +29,15 @@ import subprocess
 import threading
 from pathlib import Path
 
-from repograph_honest.graph.graph_store import CallGraph, GraphCache
-from repograph_honest.graph.watcher import ProjectWatcher
-from repograph_honest.honest.router import HonestRouter
-from repograph_honest.honest.symbol_index import ProjectIndex, get_project_index
-from repograph_honest.mcp.knowledge_base import APIKnowledgeBase
-from repograph_honest.sandbox import SandboxExecutor
-from repograph_honest.structure.extractor import StructureExtractor
-from repograph_honest.structure.relations import ParseResult
-from repograph_honest.structure.utils import call_base, call_name
+from honestcode.graph.graph_store import CallGraph, GraphCache
+from honestcode.graph.watcher import ProjectWatcher
+from honestcode.honest.router import HonestRouter
+from honestcode.honest.symbol_index import ProjectIndex, get_project_index
+from honestcode.mcp.knowledge_base import APIKnowledgeBase
+from honestcode.sandbox import SandboxExecutor
+from honestcode.structure.extractor import StructureExtractor
+from honestcode.structure.relations import ParseResult
+from honestcode.structure.utils import call_base, call_name
 
 __all__ = [
     "index_project",
@@ -72,10 +72,8 @@ _graph_mem_cache: dict[str, CallGraph] = {}
 
 
 def _cache_dir() -> Path:
-    """Directory for symbol/graph caches (override with REPOGRAPH_CACHE_DIR)."""
-    return Path(
-        os.environ.get("REPOGRAPH_CACHE_DIR", os.path.expanduser("~/.cache/repograph_honest"))
-    )
+    """Directory for symbol/graph caches (override with HONESTCODE_CACHE_DIR)."""
+    return Path(os.environ.get("HONESTCODE_CACHE_DIR", os.path.expanduser("~/.cache/honestcode")))
 
 
 # ── Internal helpers ───────────────────────────────────────────────────
@@ -578,7 +576,7 @@ def _builtin_names() -> set[str]:
 
 def _scan_non_python(p: Path) -> dict:
     """Scan a non-Python file via the optional tree-sitter multi-language path."""
-    from repograph_honest.structure import multi_lang
+    from honestcode.structure import multi_lang
 
     lang = multi_lang.detect_language(p)
     if lang is None:
@@ -586,15 +584,14 @@ def _scan_non_python(p: Path) -> dict:
             "success": False,
             "error": f"Unsupported language for {p.suffix or 'file'}. "
             "Python is fully supported; other languages need "
-            "'pip install repograph-honest[multi-language]'.",
+            "'pip install honestcode[multi-language]'.",
         }
     try:
         symbols = multi_lang.extract_symbols(p)
     except multi_lang.TreeSitterUnavailable as exc:
         return {
             "success": False,
-            "error": f"{exc}. Language detected: {lang}. "
-            "Run: pip install -e '.[multi-language]'",
+            "error": f"{exc}. Language detected: {lang}. Run: pip install -e '.[multi-language]'",
         }
     except Exception as exc:  # noqa: BLE001
         return {"success": False, "error": f"multi-language scan failed: {exc}"}

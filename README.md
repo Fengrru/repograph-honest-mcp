@@ -1,14 +1,14 @@
 <div align="center">
 
-# RepoGraph-Honest MCP Server
+# HonestCode MCP Server
 
 **Catch AI code hallucinations before they reach your editor.**
 
-[![CI](https://github.com/Fengrru/repograph-honest-mcp/actions/workflows/ci.yml/badge.svg)](https://github.com/Fengrru/repograph-honest-mcp/actions/workflows/ci.yml)
-[![PyPI version](https://img.shields.io/pypi/v/repograph-honest-mcp)](https://pypi.org/project/repograph-honest-mcp/)
-[![Python versions](https://img.shields.io/pypi/pyversions/repograph-honest-mcp)](https://pypi.org/project/repograph-honest-mcp/)
+[![CI](https://github.com/Fengrru/honestcode/actions/workflows/ci.yml/badge.svg)](https://github.com/Fengrru/honestcode/actions/workflows/ci.yml)
+[![PyPI version](https://img.shields.io/pypi/v/honestcode)](https://pypi.org/project/honestcode/)
+[![Python versions](https://img.shields.io/pypi/pyversions/honestcode)](https://pypi.org/project/honestcode/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![Downloads](https://img.shields.io/pypi/dm/repograph-honest-mcp)](https://pypi.org/project/repograph-honest-mcp/)
+[![Downloads](https://img.shields.io/pypi/dm/honestcode)](https://pypi.org/project/honestcode/)
 
 A lightweight [Model Context Protocol (MCP)](https://modelcontextprotocol.io) server that verifies
 AI-generated code against your actual project structure and installed dependencies — detecting
@@ -22,7 +22,7 @@ undefined symbols, wrong API calls, dead code, and type mismatches in real time.
 
 ## Contents
 
-- [Why RepoGraph-Honest?](#why-repograph-honest)
+- [Why HonestCode?](#why-honestcode)
 - [Performance](#performance)
 - [Quick Start](#quick-start)
 - [Environment Variables](#environment-variables)
@@ -32,7 +32,7 @@ undefined symbols, wrong API calls, dead code, and type mismatches in real time.
 - [CLI Usage](#cli-usage)
 - [Library Usage](#library-usage)
 - [Architecture](#architecture)
-- [When NOT to use RepoGraph-Honest](#when-not-to-use-repograph-honest)
+- [When NOT to use HonestCode](#when-not-to-use-honestcode)
 - [Troubleshooting](#troubleshooting)
 - [Development](#development)
 - [Security](#security)
@@ -44,15 +44,15 @@ undefined symbols, wrong API calls, dead code, and type mismatches in real time.
 
 ---
 
-## Why RepoGraph-Honest?
+## Why HonestCode?
 
 AI coding assistants hallucinate. They invent function names, fabricate library APIs, and produce
-dead code. **RepoGraph-Honest** acts as a deterministic verification layer between the model and
+dead code. **HonestCode** acts as a deterministic verification layer between the model and
 your editor — pure AST analysis, no LLM calls, no network requests.
 
 ```mermaid
 graph LR
-    A["AI Model generates code"] -->|sends code| B["RepoGraph-Honest verifies against project"]
+    A["AI Model generates code"] -->|sends code| B["HonestCode verifies against project"]
     B -->|clean code| C["Editor receives verified code"]
 ```
 
@@ -63,12 +63,12 @@ returns every undefined symbol, incorrect API call, and structural issue in a si
 
 Exposing a single tool is deliberate. Measured agent behavior shows that one well-aimed tool
 steers agents to a direct answer better than a menu of narrower ones — fewer mis-picks, fewer
-round-trips. **16 additional tools** exist for power users; opt in via the `REPOGRAPH_TOOLS`
+round-trips. **16 additional tools** exist for power users; opt in via the `HONESTCODE_TOOLS`
 environment variable (see [Environment Variables](#environment-variables)).
 
 ### Key differentiators
 
-| | RepoGraph-Honest | grep / Read | RAG over code |
+| | HonestCode | grep / Read | RAG over code |
 |:--|:-----------------|:------------|:--------------|
 | **Deterministic** | AST-based, reproducible | Exact string match | Embedding variance |
 | **Cross-file** | Module-qualified symbols | Single-file only | Chunk-level |
@@ -122,14 +122,14 @@ fewer tokens** on architecture questions spanning multiple files.
 ### 1. Install
 
 ```bash
-pip install repograph-honest-mcp
+pip install honestcode
 ```
 
 Or from source:
 
 ```bash
-git clone https://github.com/Fengrru/repograph-honest-mcp.git
-cd repograph-honest-mcp
+git clone https://github.com/Fengrru/honestcode.git
+cd honestcode-mcp
 pip install -e .
 ```
 
@@ -140,7 +140,7 @@ pip install -e .
 #### Claude Code
 
 ```bash
-claude mcp add repograph-honest -- repograph-honest-mcp
+claude mcp add honestcode -- honestcode-mcp
 ```
 
 Or manually add to `~/.claude.json`:
@@ -148,8 +148,8 @@ Or manually add to `~/.claude.json`:
 ```json
 {
   "mcpServers": {
-    "repograph-honest": {
-      "command": "repograph-honest-mcp"
+    "honestcode": {
+      "command": "honestcode-mcp"
     }
   }
 }
@@ -162,8 +162,8 @@ Add to `.cursor/mcp.json` (project) or `~/.cursor/mcp.json` (global):
 ```json
 {
   "mcpServers": {
-    "repograph-honest": {
-      "command": "repograph-honest-mcp"
+    "honestcode": {
+      "command": "honestcode-mcp"
     }
   }
 }
@@ -176,8 +176,8 @@ Add to `.vscode/mcp.json`:
 ```json
 {
   "servers": {
-    "repograph-honest": {
-      "command": "repograph-honest-mcp"
+    "honestcode": {
+      "command": "honestcode-mcp"
     }
   }
 }
@@ -190,8 +190,8 @@ Add to `~/.codeium/windsurf/mcp_config.json`:
 ```json
 {
   "mcpServers": {
-    "repograph-honest": {
-      "command": "repograph-honest-mcp"
+    "honestcode": {
+      "command": "honestcode-mcp"
     }
   }
 }
@@ -202,9 +202,9 @@ Add to `~/.codeium/windsurf/mcp_config.json`:
 ```json
 {
   "mcpServers": {
-    "repograph-honest": {
+    "honestcode": {
       "command": "python",
-      "args": ["-m", "repograph_honest.mcp.server"]
+      "args": ["-m", "honestcode.mcp.server"]
     }
   }
 }
@@ -238,22 +238,22 @@ Result: 2 issues found — undefined_call: validate_token (line 12),
 
 | Variable | Default | Description |
 |:---------|:--------|:------------|
-| `REPOGRAPH_TOOLS` | `scan_file` | Comma-separated tool names to expose (or `all`). `scan_file` is always included. |
-| `REPOGRAPH_INDEX_DIR` | `~/.cache/repograph_honest` | Directory for cached symbol indices |
-| `REPOGRAPH_CACHE_DIR` | `~/.cache/repograph_honest` | Directory for SQLite graph caches (override for CI/tests) |
-| `REPOGRAPH_TIMEOUT` | `10` | Seconds before `execute_code` is killed |
-| `REPOGRAPH_MEMORY_MB` | `256` | MB memory limit for sandboxed execution (POSIX) |
-| `REPOGRAPH_LOG_LEVEL` | `INFO` | Logging verbosity (`DEBUG`, `INFO`, `WARNING`, `ERROR`) |
+| `HONESTCODE_TOOLS` | `scan_file` | Comma-separated tool names to expose (or `all`). `scan_file` is always included. |
+| `HONESTCODE_INDEX_DIR` | `~/.cache/honestcode` | Directory for cached symbol indices |
+| `HONESTCODE_CACHE_DIR` | `~/.cache/honestcode` | Directory for SQLite graph caches (override for CI/tests) |
+| `HONESTCODE_TIMEOUT` | `10` | Seconds before `execute_code` is killed |
+| `HONESTCODE_MEMORY_MB` | `256` | MB memory limit for sandboxed execution (POSIX) |
+| `HONESTCODE_LOG_LEVEL` | `INFO` | Logging verbosity (`DEBUG`, `INFO`, `WARNING`, `ERROR`) |
 
-### `REPOGRAPH_TOOLS`
+### `HONESTCODE_TOOLS`
 
 Controls which tools the MCP server exposes. By default only `scan_file` is
 registered; set this to a comma-separated list to expose more, or to `all` to
 expose every tool:
 
 ```bash
-export REPOGRAPH_TOOLS=index,check_symbol,check_api,validate_types
-export REPOGRAPH_TOOLS=all
+export HONESTCODE_TOOLS=index,check_symbol,check_api,validate_types
+export HONESTCODE_TOOLS=all
 ```
 
 `scan_file` is always included even if not listed. Unknown names are ignored
@@ -263,7 +263,7 @@ with a warning. Available tool names: `scan_file`, `index`, `deps`,
 `explore_impact`, `affected_files`, `stop_watching`, `search_code`,
 `load_package_apis`, `get_project_stats`, `choose_tool`.
 
-> A `repograph-honest.toml` config file for per-project rules and ignore
+> A `honestcode.toml` config file for per-project rules and ignore
 > patterns is planned — tracked on the [Roadmap](#roadmap).
 
 ---
@@ -275,7 +275,7 @@ TypeScript, Go, Rust and Java, symbol extraction is available via the
 optional tree-sitter extras:
 
 ```bash
-pip install -e "repograph-honest[multi-language]"
+pip install -e "honestcode[multi-language]"
 ```
 
 Once installed, `scan_file` accepts `.js`/`.ts`/`.go`/`.rs`/`.java` files and
@@ -298,11 +298,11 @@ no external services.
 
 | Agent / Client | Config file | Auto-install |
 |:---------------|:------------|:-------------|
-| Claude Code | `~/.claude.json` | `repograph-honest install --client claude` |
-| Cursor | `.cursor/mcp.json` | `repograph-honest install --client cursor` |
-| VS Code | `.vscode/mcp.json` | `repograph-honest install --client vscode` |
+| Claude Code | `~/.claude.json` | `honestcode install --client claude` |
+| Cursor | `.cursor/mcp.json` | `honestcode install --client cursor` |
+| VS Code | `.vscode/mcp.json` | `honestcode install --client vscode` |
 | Windsurf | `~/.codeium/windsurf/mcp_config.json` | Manual (see Quick Start) |
-| Any stdio MCP client | `command: repograph-honest-mcp` | — |
+| Any stdio MCP client | `command: honestcode-mcp` | — |
 | Any SSE MCP client | `--transport sse --port 8000` | — |
 
 See [Quick Start](#quick-start) for the manual JSON snippets and the
@@ -335,11 +335,11 @@ scan_file("/path/to/project/src/auth.py")
 
 ### Additional tools (opt-in)
 
-Enable via the `REPOGRAPH_TOOLS` environment variable (see
+Enable via the `HONESTCODE_TOOLS` environment variable (see
 [Environment Variables](#environment-variables)):
 
 ```bash
-export REPOGRAPH_TOOLS=index,check_symbol,check_api,execute_code,validate_types
+export HONESTCODE_TOOLS=index,check_symbol,check_api,execute_code,validate_types
 ```
 
 | Tool | Purpose | Speed |
@@ -440,92 +440,92 @@ Return statistics about the currently indexed project.
 
 ## CLI Usage
 
-Every MCP tool has a CLI equivalent under the `repograph-honest` command, for
+Every MCP tool has a CLI equivalent under the `honestcode` command, for
 scripts and non-MCP harnesses. Output is JSON; exit code is non-zero when
 issues are found (so it drops into CI pipelines cleanly).
 
 ```bash
 # Index a project
-repograph-honest index /path/to/project
-repograph-honest index /path/to/project --force
+honestcode index /path/to/project
+honestcode index /path/to/project --force
 
 # Load dependency APIs
-repograph-honest deps /path/to/project
+honestcode deps /path/to/project
 
 # Check a symbol
-repograph-honest check-symbol pkg.core.helper
+honestcode check-symbol pkg.core.helper
 
 # Check an API
-repograph-honest check-api pandas.read_csv
+honestcode check-api pandas.read_csv
 
 # Scan a file (exit 1 if issues found)
-repograph-honest scan src/main.py
+honestcode scan src/main.py
 
 # Validate a code snippet (exit 1 if issues found)
-repograph-honest validate "for x in None: pass"
+honestcode validate "for x in None: pass"
 
 # Execute code in a sandbox
-repograph-honest execute "print(1+1)"
+honestcode execute "print(1+1)"
 
 # Find dead code (exit 1 if any dead symbols found)
-repograph-honest dead-code --entrypoints pkg.cli.main --no-tests
+honestcode dead-code --entrypoints pkg.cli.main --no-tests
 
 # Find similar code (exit 1 if any clones found)
-repograph-honest similar --threshold 0.85
+honestcode similar --threshold 0.85
 
 # Explore callers/callees of a symbol (includes blast-radius summary)
-repograph-honest call-graph pkg.core.helper
+honestcode call-graph pkg.core.helper
 
 # Blast radius of a symbol
-repograph-honest impact pkg.core.helper --depth 3
+honestcode impact pkg.core.helper --depth 3
 
 # Files/tests affected by uncommitted changes (CI killer)
-repograph-honest affected --base HEAD
-repograph-honest affected --base main --head feature-branch
+honestcode affected --base HEAD
+honestcode affected --base main --head feature-branch
 
 # Search code (exit 1 if matches found)
-repograph-honest search "def \w+_helper"
+honestcode search "def \w+_helper"
 
 # Load a single package's APIs
-repograph-honest load-package numpy
+honestcode load-package numpy
 
 # Show index statistics
-repograph-honest stats
+honestcode stats
 
 # Show which tool a query maps to
-repograph-honest choose-tool "is my_symbol defined"
+honestcode choose-tool "is my_symbol defined"
 
-# Bind a directory as a project (creates .repograph/) and discover the root
-repograph-honest init /path/to/project
-repograph-honest root
+# Bind a directory as a project (creates .honestcode/) and discover the root
+honestcode init /path/to/project
+honestcode root
 
 # Register the MCP server with Cursor / VS Code / Claude Code
-repograph-honest install --dry-run
-repograph-honest install --client cursor
+honestcode install --dry-run
+honestcode install --client cursor
 
 # Keep an index fresh during long work sessions (Ctrl+C to stop)
-repograph-honest watch /path/to/project
+honestcode watch /path/to/project
 ```
 
 You can also invoke it as a module:
 
 ```bash
-python -m repograph_honest.cli scan src/main.py
+python -m honestcode.cli scan src/main.py
 ```
 
-> The `repograph-honest-mcp` command starts the **MCP server** (stdio by
-> default); use `repograph-honest-mcp --transport sse --port 8000` for SSE.
+> The `honestcode-mcp` command starts the **MCP server** (stdio by
+> default); use `honestcode-mcp --transport sse --port 8000` for SSE.
 
 ---
 
 ## Library Usage
 
-Every MCP tool is also a plain function in `repograph_honest.mcp.tools`, so the
+Every MCP tool is also a plain function in `honestcode.mcp.tools`, so the
 same verification logic can run inside your own Python code — no MCP client
 required:
 
 ```python
-from repograph_honest.mcp.tools import check_symbol, index_project, scan_file
+from honestcode.mcp.tools import check_symbol, index_project, scan_file
 
 index_project("/path/to/project")          # build/reuse the symbol index
 print(scan_file("/path/to/project/src/auth.py"))   # hallucination scan
@@ -559,7 +559,7 @@ graph TD
 ### Module layout
 
 ```
-repograph_honest/
+honestcode/
 ├── mcp/                    # MCP server layer
 │   ├── server.py           # FastMCP entry point (stdio + SSE), tool whitelist
 │   ├── tools.py            # 17 tool implementations
@@ -567,7 +567,7 @@ repograph_honest/
 ├── honest/                 # Core hallucination detection
 │   ├── router.py           # NL query → tool routing
 │   ├── symbol_index.py     # Project-wide symbol index + caching
-│   └── project_binding.py  # .repograph/ binding + MCP client auto-config
+│   └── project_binding.py  # .honestcode/ binding + MCP client auto-config
 ├── graph/                  # Persistent graph layer
 │   ├── graph_store.py      # SQLite call graph (definitions/refs) + FTS5 index
 │   └── watcher.py          # Zero-dependency polling file watcher
@@ -589,7 +589,7 @@ repograph_honest/
 | `mcp/tools.py` | Tool functions | 17 hallucination-detection tools |
 | `mcp/knowledge_base.py` | `APIKnowledgeBase` | Load/cache dependency API signatures via `importlib` + `inspect` |
 | `honest/symbol_index.py` | `ProjectIndex` | Module-qualified symbol index with content-hash caching |
-| `honest/project_binding.py` | `init/install` | `.repograph/` project binding + MCP client auto-configuration |
+| `honest/project_binding.py` | `init/install` | `.honestcode/` project binding + MCP client auto-configuration |
 | `honest/router.py` | `HonestRouter` | Map natural-language queries to tool intents |
 | `graph/graph_store.py` | `GraphCache` | SQLite call graph (definitions/refs) + FTS5 full-text index |
 | `graph/watcher.py` | `ProjectWatcher` | Polling file watcher with debounce for auto-re-indexing |
@@ -628,7 +628,7 @@ All tools enforce output limits to prevent context window bloat:
 
 ---
 
-## When NOT to use RepoGraph-Honest
+## When NOT to use HonestCode
 
 | Scenario | Why it doesn't fit | Alternative |
 |:---------|:-------------------|:------------|
@@ -656,10 +656,10 @@ All tools enforce output limits to prevent context window bloat:
 
 ```bash
 # Check the server is importable
-python -c "from repograph_honest.mcp.server import main; print('OK')"
+python -c "from honestcode.mcp.server import main; print('OK')"
 
 # Check the CLI works
-python -m repograph_honest.cli --help
+python -m honestcode.cli --help
 
 # Run tests
 python -m pytest tests/ -q
@@ -671,8 +671,8 @@ python -m pytest tests/ -q
 
 ```bash
 # Clone and install
-git clone https://github.com/Fengrru/repograph-honest-mcp.git
-cd repograph-honest-mcp
+git clone https://github.com/Fengrru/honestcode.git
+cd honestcode-mcp
 python -m venv .venv
 source .venv/bin/activate  # Windows: .venv\Scripts\activate
 pip install -e ".[dev]"
@@ -681,8 +681,8 @@ pip install -e ".[dev]"
 pytest
 
 # Lint & format
-ruff check repograph_honest tests scripts
-ruff format repograph_honest tests scripts
+ruff check honestcode tests scripts
+ruff format honestcode tests scripts
 
 # Pre-commit hooks
 pre-commit install
@@ -712,7 +712,7 @@ See [SECURITY.md](SECURITY.md) for vulnerability reporting.
 
 ## Telemetry
 
-**RepoGraph-Honest collects no telemetry.** There are no analytics libraries,
+**HonestCode collects no telemetry.** There are no analytics libraries,
 no background services, and no phone-home endpoints:
 
 - All parsing, indexing, and verification run **100% locally** — source code
@@ -733,7 +733,7 @@ This is a design invariant, not a toggle.
 - [x] `explore_impact` blast-radius analysis
 - [x] `affected_files` git-diff → affected tests (CI killer)
 - [x] File watcher for automatic re-indexing
-- [x] Project binding (`.repograph/`) + `install` for MCP clients
+- [x] Project binding (`.honestcode/`) + `install` for MCP clients
 - [x] Multi-language symbol extraction via optional tree-sitter extras
 - [ ] VS Code extension with inline diagnostics
 - [ ] GitHub Action for PR-level hallucination checks
@@ -757,4 +757,4 @@ Contributions are welcome! Please read [CONTRIBUTING.md](CONTRIBUTING.md) first.
 
 ## License
 
-[MIT](LICENSE) - Copyright (c) 2026 RepoGraph-Honest Team
+[MIT](LICENSE) - Copyright (c) 2026 HonestCode Team

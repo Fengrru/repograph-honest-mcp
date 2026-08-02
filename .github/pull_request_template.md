@@ -13,7 +13,7 @@ Closes #...
 ## Checklist
 
 - [ ] Tests pass (`pytest`)
-- [ ] Lint passes (`ruff check repograph_honest tests scripts`)
-- [ ] Format passes (`ruff format --check repograph_honest tests scripts`)
+- [ ] Lint passes (`ruff check honestcode tests scripts`)
+- [ ] Format passes (`ruff format --check honestcode tests scripts`)
 - [ ] Documentation updated (if applicable)
 - [ ] CHANGELOG.md updated (if applicable)

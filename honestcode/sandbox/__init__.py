@@ -1,5 +1,5 @@
 """
-Sandboxed code execution for RepoGraph-Honest.
+Sandboxed code execution for HonestCode.
 
 Executes untrusted code in a fresh Python subprocess with resource limits:
   - POSIX: RLIMIT_AS (memory), RLIMIT_CPU (cpu time), RLIMIT_NOFILE (open files)
@@ -65,7 +65,7 @@ class SandboxExecutor:
         known_names = known_names or set()
         start = time.perf_counter()
 
-        with tempfile.TemporaryDirectory(prefix="repograph_sandbox_") as tmpdir:
+        with tempfile.TemporaryDirectory(prefix="honestcode_sandbox_") as tmpdir:
             script_path = Path(tmpdir) / "script.py"
             full_code = f"{prelude}\n{code}\n"
             script_path.write_text(full_code, encoding="utf-8")

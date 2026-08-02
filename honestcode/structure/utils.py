@@ -1,4 +1,4 @@
-"""Shared AST utilities for RepoGraph-Honest."""
+"""Shared AST utilities for HonestCode."""
 
 from __future__ import annotations
 

@@ -1,6 +1,6 @@
-"""Project-level binding (``.repograph/``) and MCP client auto-configuration.
+"""Project-level binding (``.honestcode/``) and MCP client auto-configuration.
 
-``init`` creates a ``.repograph/config.json`` marker next to the project root so
+``init`` creates a ``.honestcode/config.json`` marker next to the project root so
 CLI commands can discover the project without being told the path every time —
 the same idea as CodeGraph's ``.codegraph/`` binding directory. ``install``
 probes well-known MCP client config files and registers the server for you.
@@ -16,7 +16,7 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 
-BINDING_DIR = ".repograph"
+BINDING_DIR = ".honestcode"
 CONFIG_NAME = "config.json"
 
 # MCP client config locations, probed in this order.
@@ -39,13 +39,13 @@ class Binding:
 
 def _server_command() -> list[str]:
     """Command to launch the MCP server from this installation."""
-    if shutil.which("repograph-honest-mcp"):
-        return ["repograph-honest-mcp"]
-    return [sys.executable, "-m", "repograph_honest.mcp.server"]
+    if shutil.which("honestcode-mcp"):
+        return ["honestcode-mcp"]
+    return [sys.executable, "-m", "honestcode.mcp.server"]
 
 
 def init_project(path: str | None = None, force: bool = False) -> dict:
-    """Create a ``.repograph/`` binding for *path* (default: cwd)."""
+    """Create a ``.honestcode/`` binding for *path* (default: cwd)."""
     root = Path(path or os.getcwd()).resolve()
     if not root.is_dir():
         return {"success": False, "error": f"Not a directory: {root}"}
@@ -75,7 +75,7 @@ def init_project(path: str | None = None, force: bool = False) -> dict:
 
 
 def uninit_project(path: str | None = None) -> dict:
-    """Remove the ``.repograph/`` binding for *path* (default: cwd)."""
+    """Remove the ``.honestcode/`` binding for *path* (default: cwd)."""
     root = Path(path or os.getcwd()).resolve()
     binding_dir = root / BINDING_DIR
     config_path = binding_dir / CONFIG_NAME
@@ -88,7 +88,7 @@ def uninit_project(path: str | None = None) -> dict:
 def find_project_root(start: str | None = None) -> Path | None:
     """Walk upward from *start* (default: cwd) looking for a project marker.
 
-    Prefers a ``.repograph/`` binding, then falls back to a ``.git`` directory.
+    Prefers a ``.honestcode/`` binding, then falls back to a ``.git`` directory.
     """
     cur = Path(start or os.getcwd()).resolve()
     if not cur.is_dir():
@@ -137,7 +137,7 @@ def install_mcp_config(
         # Claude Code stores servers under "mcpServers"; the rest under "servers".
         key = "mcpServers" if name == "claude" else "servers"
         servers = payload.setdefault(key, {})
-        servers["repograph-honest"] = entry
+        servers["honestcode"] = entry
         if dry_run:
             skipped.append({"client": name, "path": label, "would_write": True})
             continue

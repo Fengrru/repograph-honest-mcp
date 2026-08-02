@@ -1,6 +1,6 @@
-# Contributing to RepoGraph-Honest
+# Contributing to HonestCode
 
-Thank you for your interest in making RepoGraph-Honest better! This document
+Thank you for your interest in making HonestCode better! This document
 outlines how to contribute code, report issues, and request features.
 
 ## Getting Started
@@ -17,8 +17,8 @@ outlines how to contribute code, report issues, and request features.
 
 2. Clone your fork locally:
    ```bash
-   git clone https://github.com/<your-username>/repograph-honest-mcp.git
-   cd repograph-honest-mcp
+   git clone https://github.com/<your-username>/honestcode-mcp.git
+   cd honestcode-mcp
    ```
 
 3. Create a virtual environment and install in editable mode:
@@ -48,8 +48,8 @@ outlines how to contribute code, report issues, and request features.
    pytest
 
    # Lint
-   ruff check repograph_honest tests scripts
-   ruff format --check repograph_honest tests scripts
+   ruff check honestcode tests scripts
+   ruff format --check honestcode tests scripts
 
    # Or via pre-commit
    pre-commit run --all-files
@@ -103,7 +103,7 @@ Feature requests are welcome! Open an issue describing:
 
 ## Code of Conduct
 
-Be respectful, constructive, and inclusive. We want RepoGraph-Honest to be a
+Be respectful, constructive, and inclusive. We want HonestCode to be a
 welcoming project for everyone.
 
 ## License
