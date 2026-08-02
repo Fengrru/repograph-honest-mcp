@@ -42,8 +42,6 @@ classifiers = [
 
 dependencies = [
     "mcp>=1.6.0",
-    "tree-sitter>=0.23.0",
-    "tree-sitter-python>=0.23.0",
     "pyyaml>=6.0",
     "tomli>=2.0.0; python_version<'3.11'",
 ]
@@ -58,6 +56,7 @@ dev = [
 
 [project.scripts]
 repograph-honest-mcp = "repograph_honest.mcp.server:main"
+repograph-honest = "repograph_honest.cli:main"
 
 [project.urls]
 Homepage = "https://github.com/Fengrru/repograph-honest-mcp"

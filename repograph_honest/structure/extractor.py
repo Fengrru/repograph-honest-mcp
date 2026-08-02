@@ -3,14 +3,17 @@ Parse Python source files into ``ParseResult`` objects.
 
 Provides AST-based extraction of functions, classes, variables, imports,
 imports and intra-file reference edges with minimal false positives.
+
+The implementation uses the standard-library ``ast`` module directly; no
+native parser dependency is required. A ``parser`` constructor argument is
+accepted for callers who want to plug in a tree-sitter-backed parser that
+follows the same interface, but it is optional.
 """
 
 from __future__ import annotations
 
 import ast
 from pathlib import Path
-
-from tree_sitter import Language, Parser
 
 from repograph_honest.structure.relations import ParseResult, StructEdge
 from repograph_honest.structure.utils import call_name
@@ -21,18 +24,12 @@ __all__ = ["StructureExtractor"]
 class StructureExtractor:
     """Extract functions, classes, variables, imports and local edges from a Python file."""
 
-    def __init__(self, parser: Parser | None = None):
-        if parser is None:
-            try:
-                from tree_sitter_python import language as tspython_language
-
-                self.parser = Parser(Language(tspython_language()))
-            except Exception as exc:  # noqa: BLE001
-                raise ImportError(
-                    "tree-sitter Python parser is required; install tree-sitter-python."
-                ) from exc
-        else:
-            self.parser = parser
+    def __init__(self, parser=None):
+        # ``parser`` is accepted for backwards compatibility and for callers
+        # who want to plug in an alternate parser. The default implementation
+        # uses the standard-library ``ast`` module and does not require any
+        # native dependency.
+        self.parser = parser
 
     def parse_file(self, file_path: str | Path) -> ParseResult:
         """Parse *file_path* and return a ``ParseResult``."""

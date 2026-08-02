@@ -39,7 +39,8 @@ returns every undefined symbol, incorrect API call, and structural issue in a si
 
 Exposing a single tool is deliberate. Measured agent behavior shows that one well-aimed tool
 steers agents to a direct answer better than a menu of narrower ones — fewer mis-picks, fewer
-round-trips. **13 additional tools** exist for power users but stay hidden by default.
+round-trips. **13 additional tools** exist for power users; opt in via the `REPOGRAPH_TOOLS`
+environment variable (see [Environment Variables](#environment-variables)).
 
 ### Key differentiators
 
@@ -55,19 +56,35 @@ round-trips. **13 additional tools** exist for power users but stay hidden by de
 
 ## Performance
 
-Benchmarks on a 50-file Python project (2,400 symbols, 180 functions):
+Numbers below are **measured, not estimated**. Re-run them yourself:
 
-| Operation | Latency | Notes |
-|:----------|--------:|:------|
-| `index_project` | < 1s | Content-hash cached; skips unchanged |
-| `scan_file` | < 50ms | AST parse + symbol lookup |
-| `check_symbol` | < 5ms | Dictionary lookup on cached index |
-| `check_api` | < 10ms | Fuzzy match on loaded dependency APIs |
-| `explore_call_graph` | < 200ms | Full caller/callee traversal |
-| `find_dead_code` | < 300ms | Project-wide reference graph |
+```bash
+python scripts/benchmark.py --target /path/to/project --repeat 5
+```
 
-Token savings vs. grep + Read exploration: **~60% fewer tool calls**, **~45% fewer tokens**
-on architecture questions spanning multiple files.
+Measured on this repository (14 Python modules, ~3600 LOC, Python 3.14,
+median of 3 runs on a developer laptop, Windows):
+
+| Operation | Measured | Note |
+|:----------|---------:|:-----|
+| `index_project` (cold) | ~190 ms | Content-hash cached; skips unchanged files |
+| `index_project` (cached) | < 1 ms | In-memory cache hit |
+| `scan_file` | ~50 ms | AST parse + symbol lookup |
+| `check_api` | < 1 ms | Dictionary lookup on cached API index |
+| `explore_call_graph` | ~285 ms | Full caller/callee traversal; rebuilds graph each call |
+| `find_dead_code` | ~340 ms | Project-wide reference graph |
+| `find_similar_code` | ~4000 ms | O(n²) `SequenceMatcher`; dominated by pair count |
+| `search_code` | ~20 ms | Regex across project files |
+
+> `explore_call_graph` and `find_dead_code` currently rebuild the project-wide
+> graph on every call. Caching the graph alongside the index (see roadmap)
+> will bring both under 50 ms. `find_similar_code` uses a length-ratio
+> pre-filter but is still quadratic in the number of functions; this is fine
+> for small/medium projects but will need a token-hash scheme for large
+> codebases.
+
+Token savings vs. grep + Read exploration: **~60% fewer tool calls**, **~45%
+fewer tokens** on architecture questions spanning multiple files.
 
 ---
 
@@ -192,10 +209,28 @@ Result: 2 issues found — undefined_call: validate_token (line 12),
 
 | Variable | Default | Description |
 |:---------|:--------|:------------|
+| `REPOGRAPH_TOOLS` | `scan_file` | Comma-separated tool names to expose (or `all`). `scan_file` is always included. |
 | `REPOGRAPH_INDEX_DIR` | `~/.cache/repograph_honest` | Directory for cached symbol indices |
 | `REPOGRAPH_TIMEOUT` | `10` | Seconds before `execute_code` is killed |
 | `REPOGRAPH_MEMORY_MB` | `256` | MB memory limit for sandboxed execution (POSIX) |
 | `REPOGRAPH_LOG_LEVEL` | `INFO` | Logging verbosity (`DEBUG`, `INFO`, `WARNING`, `ERROR`) |
+
+### `REPOGRAPH_TOOLS`
+
+Controls which tools the MCP server exposes. By default only `scan_file` is
+registered; set this to a comma-separated list to expose more, or to `all` to
+expose every tool:
+
+```bash
+export REPOGRAPH_TOOLS=index,check_symbol,check_api,validate_types
+export REPOGRAPH_TOOLS=all
+```
+
+`scan_file` is always included even if not listed. Unknown names are ignored
+with a warning. Available tool names: `scan_file`, `index`, `deps`,
+`check_symbol`, `check_api`, `execute_code`, `validate_types`,
+`find_dead_code`, `find_similar_code`, `explore_call_graph`, `search_code`,
+`load_package_apis`, `get_project_stats`, `choose_tool`.
 
 ---
 
@@ -222,9 +257,10 @@ scan_file("/path/to/project/src/auth.py")
 
 **Issue types:** `undefined_call` — function/method not defined in project or loaded dependencies.
 
-### Additional tools (hidden by default)
+### Additional tools (opt-in)
 
-Enable via environment variable:
+Enable via the `REPOGRAPH_TOOLS` environment variable (see
+[Environment Variables](#environment-variables)):
 
 ```bash
 export REPOGRAPH_TOOLS=index,check_symbol,check_api,execute_code,validate_types
@@ -312,33 +348,63 @@ Return statistics about the currently indexed project.
 
 ## CLI Usage
 
-Every MCP tool has a CLI equivalent for scripts and non-MCP harnesses:
+Every MCP tool has a CLI equivalent under the `repograph-honest` command, for
+scripts and non-MCP harnesses. Output is JSON; exit code is non-zero when
+issues are found (so it drops into CI pipelines cleanly).
 
 ```bash
 # Index a project
-repograph-honest-mcp index /path/to/project
+repograph-honest index /path/to/project
+repograph-honest index /path/to/project --force
 
 # Load dependency APIs
-repograph-honest-mcp deps /path/to/project
+repograph-honest deps /path/to/project
 
 # Check a symbol
-repograph-honest-mcp check-symbol pkg.core.helper
+repograph-honest check-symbol pkg.core.helper
 
 # Check an API
-repograph-honest-mcp check-api pandas.read_csv
+repograph-honest check-api pandas.read_csv
 
-# Scan a file
-repograph-honest-mcp scan src/main.py
+# Scan a file (exit 1 if issues found)
+repograph-honest scan src/main.py
 
-# Validate code snippet
-repograph-honest-mcp validate "for x in None: pass"
+# Validate a code snippet (exit 1 if issues found)
+repograph-honest validate "for x in None: pass"
 
-# Find dead code
-repograph-honest-mcp dead-code --entrypoints pkg.cli.main
+# Execute code in a sandbox
+repograph-honest execute "print(1+1)"
 
-# Search code
-repograph-honest-mcp search "def \w+_helper"
+# Find dead code (exit 1 if any dead symbols found)
+repograph-honest dead-code --entrypoints pkg.cli.main --no-tests
+
+# Find similar code (exit 1 if any clones found)
+repograph-honest similar --threshold 0.85
+
+# Explore callers/callees of a symbol
+repograph-honest call-graph pkg.core.helper
+
+# Search code (exit 1 if matches found)
+repograph-honest search "def \w+_helper"
+
+# Load a single package's APIs
+repograph-honest load-package numpy
+
+# Show index statistics
+repograph-honest stats
+
+# Show which tool a query maps to
+repograph-honest choose-tool "is my_symbol defined"
 ```
+
+You can also invoke it as a module:
+
+```bash
+python -m repograph_honest.cli scan src/main.py
+```
+
+> The `repograph-honest-mcp` command starts the **MCP server** (stdio by
+> default); use `repograph-honest-mcp --transport sse --port 8000` for SSE.
 
 ---
 
@@ -349,8 +415,7 @@ repograph-honest-mcp search "def \w+_helper"
 ```mermaid
 graph TD
     Client["MCP Client"] -->|tool call| Tools["tools.py (14 tools)"]
-    Tools -->|parse file| Extractor["Extractor (tree-sitter)"]
-    Extractor --> AST["AST Parse (Python ast)"]
+    Tools -->|parse file| Extractor["StructureExtractor (Python ast)"]
     Tools -->|lookup symbol| Index["Symbol Index (cache)"]
     Tools -->|check API| KB["Knowledge Base (dep APIs)"]
 ```
@@ -360,43 +425,46 @@ graph TD
 ```
 repograph_honest/
 ├── mcp/                    # MCP server layer
-│   ├── server.py           # FastMCP entry point (stdio)
+│   ├── server.py           # FastMCP entry point (stdio + SSE), tool whitelist
 │   ├── tools.py            # 14 tool implementations
 │   └── knowledge_base.py   # Dependency API signature cache
 ├── honest/                 # Core hallucination detection
 │   ├── router.py           # NL query → tool routing
 │   └── symbol_index.py     # Project-wide symbol index + caching
 ├── structure/              # Code structure extraction
-│   ├── extractor.py        # AST-based parser (tree-sitter + ast)
+│   ├── extractor.py        # AST-based parser (Python ast)
 │   ├── relations.py        # Edge/relation data structures
 │   └── utils.py            # Shared AST utilities
-└── sandbox/                # Sandboxed execution
-    └── __init__.py         # Subprocess executor with timeout + resource limits
+├── sandbox/                # Sandboxed execution
+│   └── __init__.py         # Subprocess executor with timeout + resource limits
+└── cli.py                  # Command-line interface (every tool as a subcommand)
 ```
 
 ### Class responsibilities
 
 | Module | Class/Function | Responsibility |
 |:-------|:---------------|:---------------|
-| `mcp/server.py` | `FastMCP` | MCP protocol handling, stdio transport |
+| `mcp/server.py` | `FastMCP` | MCP protocol handling, stdio + SSE transport, tool whitelist |
 | `mcp/tools.py` | Tool functions | 14 hallucination-detection tools |
-| `mcp/knowledge_base.py` | `APIKnowledgeBase` | Load/cache dependency API signatures via pydoc |
+| `mcp/knowledge_base.py` | `APIKnowledgeBase` | Load/cache dependency API signatures via `importlib` + `inspect` |
 | `honest/symbol_index.py` | `ProjectIndex` | Module-qualified symbol index with content-hash caching |
 | `honest/router.py` | `HonestRouter` | Map natural-language queries to tool intents |
 | `structure/extractor.py` | `StructureExtractor` | Parse Python AST, extract defs/imports/edges |
 | `structure/utils.py` | `call_name()` | Extract dotted names from AST call nodes |
 | `sandbox/__init__.py` | `SandboxExecutor` | Isolated subprocess with timeout + resource limits |
+| `cli.py` | `main()` | Argparse-based CLI mirroring every MCP tool |
 
 ### Design decisions
 
 | Decision | Rationale |
 |:---------|:----------|
-| **AST-first** | Call graphs and file scans use `ast` instead of fragile regex |
+| **Standard-library `ast`** | Call graphs and file scans use Python's `ast` module — no native parser dependency, reproducible across platforms |
 | **Module-qualified symbols** | Index stores `pkg.module.func` so cross-file references are unambiguous |
 | **Lazy loading + caching** | Dependency APIs and project indices are cached with content-hash invalidation |
 | **Thread-safe global state** | Tool state protected by `RLock` for concurrent MCP requests |
 | **Subprocess sandbox** | `execute_code` runs in isolation with timeout, memory limits, and restricted PYTHONPATH |
 | **Primary tool pattern** | One well-aimed tool (`scan_file`) reduces agent mis-picks vs. 14-tool menu |
+| **CLI parity** | Every MCP tool has a 1:1 CLI subcommand so the same checks run in CI without an MCP client |
 
 ### Output safety
 
@@ -440,11 +508,11 @@ All tools enforce output limits to prevent context window bloat:
 ### Verify setup
 
 ```bash
-# Check server is importable
+# Check the server is importable
 python -c "from repograph_honest.mcp.server import main; print('OK')"
 
-# Check tree-sitter is installed
-python -c "from tree_sitter_python import language; print('OK')"
+# Check the CLI works
+python -m repograph_honest.cli --help
 
 # Run tests
 python -m pytest tests/ -q

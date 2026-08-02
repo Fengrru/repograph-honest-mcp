@@ -1,29 +1,15 @@
-"""Tests for the MCP server layer and shared AST utilities."""
+"""Tests for the MCP server layer: tool registration, REPOGRAPH_TOOLS
+whitelist, SSE/stdio argument parsing, and shared AST utilities."""
 
 from __future__ import annotations
 
 import ast
-from pathlib import Path
+import os
 from typing import TYPE_CHECKING
 
 import pytest
 
-from repograph_honest.mcp.server import (
-    mcp_check_api,
-    mcp_check_symbol,
-    mcp_choose_tool,
-    mcp_execute_code,
-    mcp_explore_call_graph,
-    mcp_find_dead_code,
-    mcp_find_similar_code,
-    mcp_get_project_stats,
-    mcp_index_project,
-    mcp_load_package_apis,
-    mcp_load_project_deps,
-    mcp_scan_file,
-    mcp_search_code,
-    mcp_validate_types,
-)
+from repograph_honest.mcp import server as server_mod
 from repograph_honest.mcp.tools import check_symbol, validate_types
 from repograph_honest.structure.utils import call_base, call_name
 
@@ -45,117 +31,101 @@ def sample_project(tmp_path: Path):
     return tmp_path
 
 
-def test_mcp_index_project(sample_project: Path):
-    res = mcp_index_project(str(sample_project))
-    assert res["success"] is True
-    assert res["symbols_indexed"] >= 3
-    assert res["root"] == str(sample_project.resolve())
+# ── Tool registry / whitelist ──────────────────────────────────────────
+def test_default_whitelist_is_scan_file_only():
+    # Simulate an unset env var.
+    old = os.environ.pop("REPOGRAPH_TOOLS", None)
+    try:
+        wl = server_mod._resolve_tool_whitelist()
+        assert wl == {"scan_file"}
+    finally:
+        if old is not None:
+            os.environ["REPOGRAPH_TOOLS"] = old
 
 
-def test_mcp_index_project_missing_path():
-    res = mcp_index_project("/nonexistent/path/xyz")
-    assert res["success"] is False
-    assert "does not exist" in res["error"]
+def test_all_keyword_exposes_every_tool(monkeypatch):
+    monkeypatch.setenv("REPOGRAPH_TOOLS", "all")
+    wl = server_mod._resolve_tool_whitelist()
+    assert "scan_file" in wl
+    assert "index" in wl
+    assert "check_api" in wl
+    assert len(wl) == len(server_mod._ALL_TOOLS)
 
 
-def test_mcp_load_project_deps(tmp_path: Path):
-    (tmp_path / "requirements.txt").write_text("pytest>=7.0\n", encoding="utf-8")
-    res = mcp_load_project_deps(str(tmp_path))
-    assert res["success"] is True
+def test_explicit_list_includes_scan_file_implicitly(monkeypatch):
+    monkeypatch.setenv("REPOGRAPH_TOOLS", "index,check_symbol")
+    wl = server_mod._resolve_tool_whitelist()
+    assert wl == {"scan_file", "index", "check_symbol"}
 
 
-def test_mcp_check_symbol(sample_project: Path):
-    mcp_index_project(str(sample_project))
-    res = mcp_check_symbol("pkg.core.main")
-    assert res["defined"] is True
-    res = mcp_check_symbol("pkg.core.nope")
-    assert res["defined"] is False
+def test_unknown_tool_names_ignored(monkeypatch):
+    monkeypatch.setenv("REPOGRAPH_TOOLS", "scan_file,nonexistent_xyz")
+    wl = server_mod._resolve_tool_whitelist()
+    assert "nonexistent_xyz" not in wl
+    assert "scan_file" in wl
 
 
-def test_mcp_check_api():
-    mcp_load_package_apis("math")
-    res = mcp_check_api("math.sqrt")
-    assert res["valid"] is True
-    res = mcp_check_api("math.sqrtt")
-    assert res["valid"] is False
-    assert res["suggestion"]
+def test_registry_contains_all_tools():
+    expected = {
+        "scan_file",
+        "index",
+        "deps",
+        "check_symbol",
+        "check_api",
+        "execute_code",
+        "validate_types",
+        "find_dead_code",
+        "find_similar_code",
+        "explore_call_graph",
+        "search_code",
+        "load_package_apis",
+        "get_project_stats",
+        "choose_tool",
+    }
+    assert set(server_mod._ALL_TOOLS.keys()) == expected
 
 
-def test_mcp_execute_code():
-    res = mcp_execute_code("print(1 + 1)")
-    assert res["success"] is True
-    assert "2" in res["output"]
-
-
-def test_mcp_scan_file(sample_project: Path):
+# ── Tool wrappers (end-to-end through the registry) ────────────────────
+def test_scan_file_wrapper(sample_project: Path, monkeypatch):
+    # Ensure only scan_file is exposed; the wrapper should still work.
+    monkeypatch.delenv("REPOGRAPH_TOOLS", raising=False)
     bad = sample_project / "bad.py"
     bad.write_text("nonexistent_func()\n", encoding="utf-8")
-    mcp_index_project(str(sample_project))
-    res = mcp_scan_file(str(bad))
+    server_mod._mcp_index_project(str(sample_project))
+    res = server_mod._mcp_scan_file(str(bad))
     assert res["success"] is True
     assert any(i["name"] == "nonexistent_func" for i in res["issues"])
 
 
-def test_mcp_scan_file_missing():
-    res = mcp_scan_file("/nonexistent/file.py")
+def test_scan_file_missing_path_wrapper():
+    res = server_mod._mcp_scan_file("/nonexistent/file.py")
     assert res["success"] is False
 
 
-def test_mcp_validate_types():
-    res = mcp_validate_types("for x in None:\n    pass\n")
+def test_validate_types_wrapper():
+    res = server_mod._mcp_validate_types("for x in None:\n    pass\n")
     assert res["success"] is True
     assert any(i["type"] == "none_iteration" for i in res["issues"])
 
 
-def test_mcp_find_dead_code(sample_project: Path):
-    mcp_index_project(str(sample_project))
-    res = mcp_find_dead_code(entrypoints=["pkg.core.main"], include_tests=False)
-    assert res["success"] is True
-
-
-def test_mcp_find_similar_code(sample_project: Path):
-    mcp_index_project(str(sample_project))
-    res = mcp_find_similar_code(threshold=0.99)
-    assert res["success"] is True
-    assert res["count"] == 0  # no duplicate functions in sample project
-
-
-def test_mcp_explore_call_graph(sample_project: Path):
-    mcp_index_project(str(sample_project))
-    res = mcp_explore_call_graph("pkg.core.helper")
-    assert res["success"] is True
-    assert len(res["definitions"]) >= 1
-    assert any(c["caller"] == "main" or c["caller"] == "work" for c in res["callers"])
-
-
-def test_mcp_search_code(sample_project: Path):
-    mcp_index_project(str(sample_project))
-    res = mcp_search_code(r"def \w+")
-    assert res["success"] is True
-    assert res["count"] >= 3
-
-
-def test_mcp_search_code_bad_regex(sample_project: Path):
-    mcp_index_project(str(sample_project))
-    res = mcp_search_code(r"(")
-    assert res["success"] is False
-    assert "Invalid regex" in res["error"]
-
-
-def test_mcp_choose_tool():
-    res = mcp_choose_tool("check if my_symbol is defined")
+def test_choose_tool_wrapper():
+    res = server_mod._mcp_choose_tool("check if my_symbol is defined")
     assert res["tool"] == "check_symbol"
 
 
-def test_mcp_get_project_stats(sample_project: Path):
-    res = mcp_get_project_stats()
-    assert res["indexed"] is True
+def test_check_api_wrapper(monkeypatch):
+    server_mod._mcp_load_package_apis("math")
+    res = server_mod._mcp_check_api("math.sqrt")
+    assert res["valid"] is True
+    res = server_mod._mcp_check_api("math.sqrtt")
+    assert res["valid"] is False
+    assert res.get("suggestion")
 
 
-def test_mcp_get_project_stats_not_indexed(monkeypatch):
-    monkeypatch.setattr("repograph_honest.mcp.tools._project_index", None)
-    res = mcp_get_project_stats()
+def test_index_project_missing_path_wrapper():
+    res = server_mod._mcp_index_project("/nonexistent/path/xyz")
     assert res["success"] is False
+    assert "does not exist" in res["error"]
 
 
 # ── Utils ──────────────────────────────────────────────────────────────

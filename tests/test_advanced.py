@@ -98,6 +98,43 @@ def test_explore_call_graph(sample_project: Path):
     assert "main" in callers or "work" in callers or "<module>" in callers
 
 
+def test_explore_call_graph_callees_by_qualified_name(sample_project: Path):
+    """``main()`` calls ``helper()`` — callees of ``pkg.core.main`` must
+    include ``helper``. This previously returned an empty list because the
+    reference context was recorded as the short name ``main`` while the
+    query used the qualified name ``pkg.core.main``.
+    """
+    index_project(str(sample_project), force_rebuild=True)
+    res = explore_call_graph("pkg.core.main")
+    assert res["success"] is True
+    callee_names = {c["callee"] for c in res["callees"]}
+    assert "helper" in callee_names, f"helper should be a callee of main; got {callee_names}"
+
+
+def test_explore_call_graph_callees_short_name_fallback(sample_project: Path):
+    """Short-name lookup must still resolve callers (the reference graph
+    stores references by the called name, so ``helper``'s callers can be
+    found via the short name even though ``main``'s own definitions are only
+    stored under the qualified name ``pkg.core.main``).
+    """
+    index_project(str(sample_project), force_rebuild=True)
+    res = explore_call_graph("helper")
+    assert res["success"] is True
+    callers = {c["caller"] for c in res["callers"]}
+    assert "pkg.core.main" in callers or "pkg.core.Worker.work" in callers
+
+
+def test_explore_call_graph_class_method_callees(sample_project: Path):
+    """``Worker.work()`` calls ``helper()`` — callees of
+    ``pkg.core.Worker.work`` must include ``helper``.
+    """
+    index_project(str(sample_project), force_rebuild=True)
+    res = explore_call_graph("pkg.core.Worker.work")
+    assert res["success"] is True
+    callee_names = {c["callee"] for c in res["callees"]}
+    assert "helper" in callee_names, f"helper should be a callee of work; got {callee_names}"
+
+
 def test_find_dead_code(sample_project: Path):
     index_project(str(sample_project), force_rebuild=True)
     res = find_dead_code(entrypoints=["pkg.core.main"])

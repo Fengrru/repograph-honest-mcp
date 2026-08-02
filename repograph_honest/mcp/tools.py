@@ -161,10 +161,26 @@ class _CallGraph:
 
 
 def _build_call_graph(root: Path) -> _CallGraph:
-    """Build a project-wide definition/reference graph from ASTs."""
+    """Build a project-wide definition/reference graph from ASTs.
+
+    Reference ``context`` is recorded as the **module-qualified** enclosing
+    symbol name (e.g. ``pkg.core.main``) when derivable, so that callers of
+    ``explore_call_graph`` can match by the same key they pass in. The short
+    name (``main``) is still recorded as a secondary key for backwards
+    compatibility with short-name lookups.
+    """
     graph = _CallGraph()
 
     for p, res in _parse_results_for(root).items():
+        # Build a lineno -> module-qualified enclosing context map for this file.
+        # Map from short name -> qualified name using the (already-prefixed)
+        # function/class defs returned by _parse_results_for.
+        module = _module_name(p, root)
+        qualified_by_short: dict[str, str] = {}
+        for qname in list(res.func_defs.keys()) + list(res.class_defs.keys()):
+            short = qname.split(".")[-1]
+            qualified_by_short.setdefault(short, qname)
+
         # Definitions
         for name, (start, end) in res.func_defs.items():
             graph.definitions.setdefault(name, []).append((p, start + 1, end + 1, "function"))
@@ -180,7 +196,7 @@ def _build_call_graph(root: Path) -> _CallGraph:
                     (p, edge.tgt_start + 1, "reference", None)
                 )
 
-        # AST-level references with enclosing context.
+        # AST-level references with enclosing context (module-qualified).
         try:
             tree = ast.parse(p.read_text(encoding="utf-8"), filename=str(p))
         except SyntaxError:
@@ -188,9 +204,12 @@ def _build_call_graph(root: Path) -> _CallGraph:
 
         for node in ast.iter_child_nodes(tree):
             if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
-                _collect_refs_in(node, p, graph, context=node.name)
+                ctx = qualified_by_short.get(node.name, node.name)
+                _record_reference(node, p, graph, ctx)
+                _collect_refs_in(node, p, graph, ctx, qualified_by_short)
             else:
-                _collect_refs_in(node, p, graph, context=None)
+                _record_reference(node, p, graph, module or None)
+                _collect_refs_in(node, p, graph, module or None, qualified_by_short)
 
     return graph
 
@@ -200,28 +219,54 @@ def _collect_refs_in(
     p: Path,
     graph: _CallGraph,
     context: str | None,
+    qualified_by_short: dict[str, str] | None = None,
 ) -> None:
-    """Collect call/name references inside *node* and attach *context*."""
-    for child in ast.walk(node):
-        if isinstance(child, ast.Call):
-            name = call_name(child.func)
-            if name:
-                graph.references.setdefault(name, []).append((p, child.lineno, "call", context))
-        elif isinstance(child, ast.Name):
-            # Skip store contexts (assign targets, etc.)
-            if isinstance(child.ctx, ast.Store):
-                continue
-            graph.references.setdefault(child.id, []).append(
-                (p, child.lineno, "reference", context)
-            )
-        elif isinstance(child, ast.Attribute):
-            if isinstance(child.ctx, ast.Store):
-                continue
-            name = call_name(child)
-            if name:
-                graph.references.setdefault(name, []).append(
-                    (p, child.lineno, "attribute", context)
-                )
+    """Collect call/name references inside *node*, attaching *context*.
+
+    When *qualified_by_short* is provided and a nested ``FunctionDef`` /
+    ``ClassDef`` is encountered, the context is updated to that node's
+    module-qualified name (looked up by its short name) so that references
+    inside a class method are attributed to ``pkg.Mod.Class.method`` rather
+    than to the enclosing class.
+    """
+    for child in ast.iter_child_nodes(node):
+        if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            # Recurse with the child's qualified name as the new context.
+            if qualified_by_short is not None:
+                child_ctx = qualified_by_short.get(child.name)
+                if child_ctx is None:
+                    # Build a dotted path from the current context.
+                    child_ctx = f"{context}.{child.name}" if context else child.name
+            else:
+                child_ctx = child.name
+            _record_reference(child, p, graph, child_ctx)
+            _collect_refs_in(child, p, graph, child_ctx, qualified_by_short)
+        else:
+            _record_reference(child, p, graph, context)
+            _collect_refs_in(child, p, graph, context, qualified_by_short)
+
+
+def _record_reference(
+    child: ast.AST,
+    p: Path,
+    graph: _CallGraph,
+    context: str | None,
+) -> None:
+    """Record a single AST node as a reference if it is a call/name/attribute."""
+    if isinstance(child, ast.Call):
+        name = call_name(child.func)
+        if name:
+            graph.references.setdefault(name, []).append((p, child.lineno, "call", context))
+    elif isinstance(child, ast.Name):
+        if isinstance(child.ctx, ast.Store):
+            return
+        graph.references.setdefault(child.id, []).append((p, child.lineno, "reference", context))
+    elif isinstance(child, ast.Attribute):
+        if isinstance(child.ctx, ast.Store):
+            return
+        name = call_name(child)
+        if name:
+            graph.references.setdefault(name, []).append((p, child.lineno, "attribute", context))
 
 
 # ── Tools ──────────────────────────────────────────────────────────────
@@ -350,9 +395,13 @@ def check_api(api_name: str) -> dict:
     dep_names = _dep_kb.all_names()
     base_known = _dep_kb.has(base) or any(k.startswith(base + ".") for k in dep_names)
     if not base_known:
-        if "." not in api_name:
-            return {"success": True, "api": api_name, "valid": False, "reason": "unknown module"}
-        return {"success": True, "api": api_name, "valid": False, "reason": "unknown module"}
+        return {
+            "success": True,
+            "api": api_name,
+            "valid": False,
+            "reason": "unknown module",
+            "suggestion": [],
+        }
 
     members = [k for k in dep_names if k.startswith(base + ".")]
     attr_part = api_name.split(".")[-1]
@@ -388,6 +437,72 @@ def execute_code(code: str, prelude: str = "", known_names: list[str] | None = N
     return result.to_dict()
 
 
+def _collect_local_defined(tree: ast.AST) -> set[str]:
+    """Collect locally defined names (functions, classes, vars, parameters).
+
+    Includes parameters and assignment targets so that ``self.helper()`` or
+    ``client.fetch()`` are not flagged when ``self`` / ``client`` are bound
+    in the enclosing scope.
+    """
+    defined: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            defined.add(node.name)
+            for a in node.args.args + node.args.posonlyargs + node.args.kwonlyargs:
+                if a.arg:
+                    defined.add(a.arg)
+            if node.args.vararg:
+                defined.add(node.args.vararg.arg)
+            if node.args.kwarg:
+                defined.add(node.args.kwarg.arg)
+        elif isinstance(node, ast.ClassDef):
+            defined.add(node.name)
+        elif isinstance(node, ast.Assign):
+            for target in node.targets:
+                _collect_assign_targets(target, defined)
+        elif isinstance(node, (ast.AnnAssign, ast.AugAssign)) and isinstance(node.target, ast.Name):
+            defined.add(node.target.id)
+        elif isinstance(node, (ast.For, ast.AsyncFor)):
+            _collect_assign_targets(node.target, defined)
+        elif isinstance(node, ast.NamedExpr):  # walrus :=
+            if isinstance(node.target, ast.Name):
+                defined.add(node.target.id)
+    return defined
+
+
+def _collect_assign_targets(target: ast.expr, defined: set[str]) -> None:
+    if isinstance(target, ast.Name):
+        defined.add(target.id)
+    elif isinstance(target, (ast.Tuple, ast.List)):
+        for elt in target.elts:
+            _collect_assign_targets(elt, defined)
+    elif isinstance(target, ast.Starred):
+        _collect_assign_targets(target.value, defined)
+
+
+def _imported_names(res) -> set[str]:
+    """Flatten imported symbols into locally bound names.
+
+    Handles ``import X`` (binds X), ``import X as Y`` (binds Y),
+    ``from M import A`` (binds A), and ``from M import A as B`` (binds B).
+    """
+    bound: set[str] = set()
+    for local_name, source_name in (res.imported_symbols or {}).items():
+        bound.add(local_name)
+        # Also expose the leaf of the source so `pd.read_csv` matches
+        # `import pandas as pd` (local_name == "pd").
+        if source_name:
+            bound.add(source_name.split(".")[0])
+    return bound
+
+
+def _builtin_names() -> set[str]:
+    """Return the full set of Python builtin names (functions + exceptions)."""
+    import builtins
+
+    return set(dir(builtins))
+
+
 def scan_file(file_path: str) -> dict:
     """Scan a file for potential hallucinations: undefined symbols and missing imports."""
     p = Path(file_path)
@@ -402,58 +517,23 @@ def scan_file(file_path: str) -> dict:
         idx = _project_index
         dep_names = _dep_kb.all_names()
 
-    defined = set(res.func_defs.keys()) | set(res.class_defs.keys()) | set(res.var_defs.keys())
-    defined |= res.imports
-    if idx is not None:
-        defined |= set(idx.symbols.keys())
-    defined |= dep_names
-    # Common builtins.
-    defined |= {
-        "print",
-        "len",
-        "range",
-        "enumerate",
-        "zip",
-        "map",
-        "filter",
-        "sorted",
-        "sum",
-        "min",
-        "max",
-        "abs",
-        "round",
-        "int",
-        "str",
-        "float",
-        "bool",
-        "list",
-        "dict",
-        "set",
-        "tuple",
-        "type",
-        "isinstance",
-        "hasattr",
-        "getattr",
-        "open",
-        "input",
-        "repr",
-        "vars",
-        "locals",
-        "globals",
-        "dir",
-        "super",
-        "Exception",
-        "ValueError",
-        "TypeError",
-        "KeyError",
-        "IndexError",
-        "AttributeError",
-    }
-
     try:
-        tree = ast.parse(p.read_text(encoding="utf-8"), filename=str(p))
+        source = p.read_text(encoding="utf-8")
+        tree = ast.parse(source, filename=str(p))
     except SyntaxError as e:
         return {"success": False, "error": f"SyntaxError: {e}"}
+
+    # Locally defined names (functions/classes/vars + parameters + loop targets).
+    defined = _collect_local_defined(tree)
+    # Names introduced by import statements (both local alias and module root).
+    defined |= _imported_names(res)
+    # Module-qualified project symbols.
+    if idx is not None:
+        defined |= set(idx.symbols.keys())
+    # Dependency API names.
+    defined |= dep_names
+    # Full builtin set instead of a hand-picked subset.
+    defined |= _builtin_names()
 
     issues: list[dict] = []
     seen: set[tuple[str, int]] = set()
@@ -462,6 +542,7 @@ def scan_file(file_path: str) -> dict:
             continue
         name = call_name(node.func)
         if not name:
+            # Complex call target (e.g. ``(a + b).foo()``) — skip, can't judge.
             continue
         base = call_base(name)
         if base in defined or name in defined:
@@ -762,6 +843,10 @@ def explore_call_graph(symbol_name: str) -> dict:
     definitions = graph.definitions.get(symbol_name, [])
     short_name = symbol_name.split(".")[-1]
 
+    # Names that count as "this symbol" — both the fully-qualified form and
+    # the short form, so a call context recorded as either will match.
+    self_names = {symbol_name, short_name}
+
     # Callers: places that reference *symbol_name* (or its short name).
     callers: list[dict] = []
     seen_callers: set[tuple[str, int, str]] = set()
@@ -782,13 +867,17 @@ def explore_call_graph(symbol_name: str) -> dict:
                 }
             )
 
-    # Callees: symbols referenced from inside *symbol_name*'s definitions.
+    # Callees: symbols referenced from inside any of *symbol_name*'s definitions.
+    # A reference is "inside" when its enclosing context matches the symbol
+    # (by qualified or short name) AND its line falls within the def's span.
+    def_spans = [(line, end) for _p, line, end, _kind in definitions]
     callee_names: set[str] = set()
-    for _p, line, _end, _kind in definitions:
-        for ref_name, refs in graph.references.items():
-            for _rp, rline, _rkind, rcontext in refs:
-                if rcontext == symbol_name and rline >= line:
-                    callee_names.add(ref_name)
+    for ref_name, refs in graph.references.items():
+        for _rp, rline, _rkind, rcontext in refs:
+            if rcontext not in self_names:
+                continue
+            if any(start <= rline <= end for start, end in def_spans):
+                callee_names.add(ref_name)
 
     callees: list[dict] = []
     for callee in sorted(callee_names):

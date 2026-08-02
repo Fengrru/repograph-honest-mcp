@@ -1,7 +1,6 @@
 # Core runtime dependencies for the RepoGraph-Honest MCP server.
-# Lightweight: no torch / transformers required.
+# Lightweight: no torch / transformers / tree-sitter required — the
+# server parses Python with the standard-library `ast` module.
 mcp>=1.6.0
-tree-sitter>=0.23.0
-tree-sitter-python>=0.23.0
 pyyaml>=6.0
 tomli>=2.0.0; python_version<"3.11"
