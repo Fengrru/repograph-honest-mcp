@@ -20,6 +20,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Project binding directory `.repograph/` → **`.honestcode/`**
   - GitHub repository `Fengrru/repograph-honest-mcp` → **`Fengrru/honestcode`**
 
+### Fixed
+
+- **Pin `mcp>=1.6.0,<2.0`** — `mcp` 2.0 removed `mcp.server.fastmcp`, breaking
+  the server import in fresh environments; the constraint keeps the 1.x API
+  until the code is adapted.
+- **Align pre-commit hooks with ruff** — `ruff-pre-commit` bumped to
+  `v0.16.1` (from `v0.11.13`), removing the stale UP038 rule drift that failed
+  the lint job.
+
 ### Added
 
 - **Persistent call graph (SQLite)** — `graph/graph_store.py` persists the
