@@ -8,7 +8,6 @@
 [![PyPI version](https://img.shields.io/pypi/v/honestcode)](https://pypi.org/project/honestcode/)
 [![Python versions](https://img.shields.io/pypi/pyversions/honestcode)](https://pypi.org/project/honestcode/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![Downloads](https://img.shields.io/pypi/dm/honestcode)](https://pypi.org/project/honestcode/)
 
 A lightweight [Model Context Protocol (MCP)](https://modelcontextprotocol.io) server that verifies
 AI-generated code against your actual project structure and installed dependencies — detecting
