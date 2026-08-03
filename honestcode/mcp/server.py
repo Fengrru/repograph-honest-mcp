@@ -38,15 +38,6 @@ logger = logging.getLogger("honestcode.mcp")
 
 mcp = FastMCP("honestcode")
 
-# Registry of (tool_name -> wrapper_function, description).
-# Wrappers are registered lazily based on the HONESTCODE_TOOLS whitelist.
-_TOOL_REGISTRY: dict[str, tuple[Callable, str]] = {}
-
-
-def _register_tool(name: str, func: Callable, description: str) -> None:
-    """Record *func* under *name*; registered into FastMCP at server start."""
-    _TOOL_REGISTRY[name] = (func, description)
-
 
 def _mcp_index_project(root_path: str, force_rebuild: bool = False, watch: bool = False) -> dict:
     """Build (or reuse) the symbol index for a project directory.
@@ -60,7 +51,7 @@ def _mcp_index_project(root_path: str, force_rebuild: bool = False, watch: bool 
         watch: If True, start a background watcher that re-indexes on changes.
     """
     logger.info("index_project(%s, force_rebuild=%s, watch=%s)", root_path, force_rebuild, watch)
-    return _tools.index_project(root_path, force_rebuild=force_rebuild)
+    return _tools.index_project(root_path, force_rebuild=force_rebuild, watch=watch)
 
 
 def _mcp_load_project_deps(root_path: str) -> dict:
@@ -274,10 +265,9 @@ def _register_tools() -> None:
         if name in already:
             continue
         func, _desc = _ALL_TOOLS[name]
-        # FastMCP infers the schema from the function name and signature.
-        # Use the wrapper's original __name__ so the tool shows up as `name`.
-        func.__name__ = name  # type: ignore[misc]
-        mcp.tool()(func)
+        # FastMCP infers the schema from the function signature; pass the
+        # public tool name explicitly so it shows up as `name`.
+        mcp.tool(name=name)(func)
         already.add(name)
     mcp._registered_tool_names = already  # type: ignore[attr-defined]
 

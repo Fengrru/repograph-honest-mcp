@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.2.0] - 2026-08-03
 
 ### Changed
 
@@ -96,6 +96,50 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`StructureExtractor`** no longer hard-requires `tree-sitter-python` at
   construction time. The parser has always used `ast`; the tree-sitter
   import was a vestigial guard that raised a misleading `ImportError`.
+- **MCP `index_project(watch=True)` now works** — the server wrapper
+  previously dropped the `watch` flag, so MCP clients could never start the
+  background file watcher (the CLI path was unaffected).
+- **`affected_files` honors `max_depth`** — the reverse BFS previously ran
+  unbounded (the parameter was accepted but never used), traversing the
+  whole graph on large repos.
+- **Environment variables actually read** — `HONESTCODE_TIMEOUT`,
+  `HONESTCODE_MEMORY_MB` and `HONESTCODE_INDEX_DIR` are now honored by the
+  sandbox and the symbol-index cache (previously documented but ignored,
+  which also made tests write into the real user cache directory).
+- **`install --client cursor` writes the right key** — Cursor config now
+  uses `mcpServers` (as Cursor requires) instead of the VS Code-style
+  `servers` key.
+- **Call-graph reference lines corrected** — references recorded from the
+  extractor's same-scope edges used the *definition* line as the reference
+  line; the duplicated edge pass was removed (the AST walk already covers
+  those references with proper context).
+- **`index_project` reports true cache status** — the `cached` field now
+  reflects whether the index actually came from cache instead of
+  `not force_rebuild`.
+- **Multi-language scan false positives** — attribute calls
+  (`obj.method(`) and constructs like `new Foo(` are no longer reported as
+  `undefined_call`.
+- **Callee matching is file-aware** — `explore_call_graph` /
+  `explore_impact` now require a reference to live in the same file as the
+  definition, so short names that collide across modules no longer
+  produce phantom callees.
+- **Poetry `dict` dependencies parsed** — `tool.poetry.dependencies` in
+  `{name: version}` form is now loaded (list form already worked).
+- **Sandbox scrubs secrets** — the executed subprocess no longer inherits
+  environment variables whose names contain KEY/TOKEN/SECRET/AUTH markers.
+- **`GraphCache.is_fresh` connection leak fixed** — the SQLite connection
+  is now closed on every error path.
+- **`check_call` module matching** — compares against module path
+  components instead of substring matching (`"util"` no longer matches
+  `"pkg.utility"`).
+- **Tree-sitter `type_identifier` nodes** — TS type aliases and Go type
+  specs now extract their names (query previously expected `identifier`).
+- **CLI `execute --known-names`** — the sandbox's typo-suggestion names
+  are now reachable from the command line.
+- Dead code removed: `_lazy_router`/`_router` globals, `validate_snippet`,
+  `_healthcheck`, the unused `_TOOL_REGISTRY` scaffolding.
+- `SandboxExecutor(timeout=0, ...)` no longer silently resets to the
+  default limit (`memory_mb or 256` → explicit `None` checks).
 
 ### Changed
 

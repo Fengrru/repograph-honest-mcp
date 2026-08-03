@@ -70,6 +70,14 @@ _SYMBOL_RULES: dict[str, list[tuple[str, str]]] = {
     ],
 }
 
+# Some grammars name their declaration nodes with a ``type_identifier``
+# instead of an ``identifier`` (e.g. TypeScript type aliases, Go type specs);
+# the query patterns below use the correct node type per language.
+_NAME_NODE_TYPES: dict[str, dict[str, str]] = {
+    "typescript": {"type_alias_declaration": "type_identifier"},
+    "go": {"type_spec": "type_identifier"},
+}
+
 _QUERIES: dict[str, object] = {}
 
 
@@ -124,7 +132,11 @@ def _load_language(name: str) -> object:  # pragma: no cover - requires optional
 def _query_for(name: str, Language) -> object:  # pragma: no cover - requires optional extras
     if name in _QUERIES:
         return _QUERIES[name]
-    parts = [f"({node} name: (identifier) @name.{kind})" for node, kind in _SYMBOL_RULES[name]]
+    name_node_overrides = _NAME_NODE_TYPES.get(name, {})
+    parts = [
+        f"({node} name: ({name_node_overrides.get(node, 'identifier')}) @name.{kind})"
+        for node, kind in _SYMBOL_RULES[name]
+    ]
     query = Language.query(" ".join(parts))
     _QUERIES[name] = query
     return query

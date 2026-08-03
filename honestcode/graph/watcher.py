@@ -73,7 +73,10 @@ class ProjectWatcher:
     def stop(self) -> None:
         self._stop.set()
         self._thread.join(timeout=5)
-        logger.info("Watcher stopped for %s", self.root)
+        if self._thread.is_alive():
+            logger.warning("Watcher thread for %s did not stop within 5s", self.root)
+        else:
+            logger.info("Watcher stopped for %s", self.root)
 
     # -- internals ---------------------------------------------------------
 

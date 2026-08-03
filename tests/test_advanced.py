@@ -95,7 +95,8 @@ def test_explore_call_graph(sample_project: Path):
     res = explore_call_graph("pkg.core.helper")
     assert res["success"] is True
     callers = {c["caller"] for c in res["callers"]}
-    assert "main" in callers or "work" in callers or "<module>" in callers
+    # Callers are module-qualified (pkg.core.main); accept short names too.
+    assert any(c == "<module>" or c.endswith(".main") or c.endswith(".work") for c in callers)
 
 
 def test_explore_call_graph_callees_by_qualified_name(sample_project: Path):

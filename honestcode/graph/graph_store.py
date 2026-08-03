@@ -81,14 +81,17 @@ class GraphCache:
         """True when the cached graph covers exactly the current file tree."""
         if not self.path.exists():
             return False
+        conn = None
         try:
             conn = sqlite3.connect(str(self.path))
             cur = conn.cursor()
             row = cur.execute("SELECT value FROM meta WHERE key='hashes'").fetchone()
             root_row = cur.execute("SELECT value FROM meta WHERE key='root'").fetchone()
-            conn.close()
         except sqlite3.Error:
             return False
+        finally:
+            if conn is not None:
+                conn.close()
         if row is None or root_row is None:
             return False
         if root_row[0] != str(root.resolve()):

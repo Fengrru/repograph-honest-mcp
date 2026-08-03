@@ -23,6 +23,20 @@ logger = logging.getLogger(__name__)
 
 __all__ = ["ExecutionResult", "SandboxExecutor"]
 
+# Environment variable names containing these markers are scrubbed before
+# the sandboxed subprocess starts, so secrets (API keys, tokens, passwords)
+# never reach code being executed.
+_SENSITIVE_ENV_MARKERS = (
+    "KEY",
+    "TOKEN",
+    "SECRET",
+    "PASSWORD",
+    "PASSWD",
+    "CREDENTIAL",
+    "AUTH",
+    "SIGNATURE",
+)
+
 
 @dataclass
 class ExecutionResult:
@@ -51,9 +65,17 @@ class ExecutionResult:
 class SandboxExecutor:
     """Execute Python code snippets in a restricted subprocess."""
 
-    def __init__(self, timeout: int = 10, memory_mb: int | None = None):
-        self.timeout = timeout
-        self.memory_mb = memory_mb or 256  # default 256 MB limit
+    def __init__(self, timeout: int | None = None, memory_mb: int | None = None):
+        # Environment overrides (HONESTCODE_TIMEOUT / HONESTCODE_MEMORY_MB)
+        # apply when the caller does not pass explicit values.
+        env_timeout = os.environ.get("HONESTCODE_TIMEOUT", "")
+        self.timeout = (
+            timeout if timeout is not None else int(env_timeout) if env_timeout.isdigit() else 10
+        )
+        env_memory = os.environ.get("HONESTCODE_MEMORY_MB", "")
+        self.memory_mb = (
+            memory_mb if memory_mb is not None else int(env_memory) if env_memory.isdigit() else 256
+        )
 
     def execute(
         self,
@@ -70,7 +92,11 @@ class SandboxExecutor:
             full_code = f"{prelude}\n{code}\n"
             script_path.write_text(full_code, encoding="utf-8")
 
-            env = os.environ.copy()
+            env = {
+                k: v
+                for k, v in os.environ.items()
+                if not any(marker in k.upper() for marker in _SENSITIVE_ENV_MARKERS)
+            }
             env["PYTHONPATH"] = ""
             env["PYTHONDONTWRITEBYTECODE"] = "1"
 

@@ -155,8 +155,10 @@ class HonestRouter:
             return {"call": call, "valid": True, "source": "dependency"}
 
         # Check whether the base module looks like a project module.
+        # Compare against the full module path components, not a substring
+        # ("util" must not match "pkg.utility").
         base = call.split("(")[0].split(".")[0].strip()
-        if file_path and base in self._module_of(file_path):
+        if file_path and base in self._module_of(file_path).split("."):
             return {"call": call, "valid": True, "source": "same_module"}
 
         suggestions = difflib.get_close_matches(

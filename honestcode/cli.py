@@ -132,7 +132,7 @@ def _cmd_validate(args: argparse.Namespace) -> int:
 
 
 def _cmd_execute(args: argparse.Namespace) -> int:
-    return _emit(_tools.execute_code(args.code, prelude=args.prelude))
+    return _emit(_tools.execute_code(args.code, prelude=args.prelude, known_names=args.known_names))
 
 
 def _cmd_dead_code(args: argparse.Namespace) -> int:
@@ -219,6 +219,12 @@ def _build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("execute", help="Execute code in a sandboxed subprocess.")
     p.add_argument("code", help="Python source to execute.")
     p.add_argument("--prelude", default="", help="Setup code run before the main code.")
+    p.add_argument(
+        "--known-names",
+        nargs="*",
+        default=None,
+        help="Known symbol names for typo suggestions.",
+    )
     p.set_defaults(func=_cmd_execute)
 
     p = sub.add_parser(

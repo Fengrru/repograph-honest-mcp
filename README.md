@@ -112,6 +112,12 @@ after a change pays the cold rebuild, every later call is a cache hit.
 the number of functions; this is fine for small/medium projects but will need
 a token-hash scheme for large codebases.
 
+> Note: the "hot" graph numbers above are in-process cache hits. A fresh
+> process pays one full-tree SHA-256 pass (to validate the SQLite cache's
+> freshness) on its *first* graph query after startup, then every later call
+> is a cache hit. On this repo that validation adds roughly the cost of a
+> cold `index_project` (~143 ms).
+
 Token savings vs. grep + Read exploration: **~60% fewer tool calls**, **~45%
 fewer tokens** on architecture questions spanning multiple files.
 

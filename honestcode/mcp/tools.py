@@ -63,7 +63,6 @@ _state_lock = threading.RLock()
 _project_index: ProjectIndex | None = None
 _project_root: Path | None = None
 _dep_kb: APIKnowledgeBase = APIKnowledgeBase()
-_router: HonestRouter | None = None
 _sandbox: SandboxExecutor = SandboxExecutor()
 _extractor: StructureExtractor = StructureExtractor()
 # In-memory call-graph cache keyed by resolved project root. The SQLite
@@ -77,20 +76,6 @@ def _cache_dir() -> Path:
 
 
 # ── Internal helpers ───────────────────────────────────────────────────
-def _lazy_router() -> HonestRouter | None:
-    global _router
-    with _state_lock:
-        if _router is None:
-            proj = _project_index.symbols if _project_index else {}
-            _router = HonestRouter(
-                project_symbols=proj,
-                dep_symbols=_dep_kb.all_names(),
-                dep_kb=_dep_kb,
-                project_root=_project_root,
-            )
-        return _router
-
-
 def _module_name(p: Path, root: Path) -> str:
     """Infer a dotted module name from *p* relative to *root*.
 
@@ -188,14 +173,11 @@ def _build_call_graph(root: Path) -> CallGraph:
         for name, (start, end) in res.var_defs.items():
             graph.definitions.setdefault(name, []).append((p, start + 1, end + 1, "variable"))
 
-        # Edges from the extractor already capture intra-file refs.
-        for edge in res.edges:
-            if edge.name:
-                graph.references.setdefault(edge.name, []).append(
-                    (p, edge.tgt_start + 1, "reference", None)
-                )
-
         # AST-level references with enclosing context (module-qualified).
+        # The extractor's same-scope edges are intentionally not re-recorded
+        # here: the AST walk below already captures every Name/Attribute/
+        # Call reference (with context), and re-adding edges would duplicate
+        # caller entries with wrong (definition) line numbers.
         try:
             tree = ast.parse(p.read_text(encoding="utf-8"), filename=str(p))
         except SyntaxError:
@@ -314,12 +296,11 @@ def _ensure_watcher(root: Path) -> None:
         return
 
     def _on_change(changed: list) -> None:
+        global _project_index, _project_root
         idx = get_project_index(root, force_rebuild=False)
         with _state_lock:
-            global _project_index, _project_root, _router
             _project_index = idx
             _project_root = root
-            _router = None
             _invalidate_graph_cache()
         logger.info("Watcher: re-indexed after %d file changes", len(changed))
 
@@ -339,7 +320,7 @@ def stop_watching() -> dict:
 
 def index_project(root_path: str, force_rebuild: bool = False, watch: bool = False) -> dict:
     """Build (or reuse) the symbol index for a project directory."""
-    global _project_index, _router, _project_root
+    global _project_index, _project_root
     root = Path(root_path)
     if not root.exists():
         return {"success": False, "error": f"Path does not exist: {root_path}"}
@@ -348,7 +329,6 @@ def index_project(root_path: str, force_rebuild: bool = False, watch: bool = Fal
     with _state_lock:
         _project_root = resolved
         _project_index = idx
-        _router = None
         _invalidate_graph_cache()
     if watch:
         _ensure_watcher(resolved)
@@ -356,7 +336,7 @@ def index_project(root_path: str, force_rebuild: bool = False, watch: bool = Fal
         "success": True,
         "symbols_indexed": len(idx.symbols),
         "root": str(resolved),
-        "cached": not force_rebuild,
+        "cached": idx.cached,
         "watching": _watcher is not None,
     }
 
@@ -377,9 +357,6 @@ def load_project_deps(root_path: str) -> dict:
                     loaded.append(pkg)
             except Exception:  # noqa: BLE001
                 logger.debug("Failed to load package %s", pkg)
-    with _state_lock:
-        global _router
-        _router = None
     return {"success": True, "packages_loaded": loaded, "total_apis": len(_dep_kb.all_names())}
 
 
@@ -418,6 +395,9 @@ def _parse_pyproject_deps(text: str) -> list[str]:
                 cur = cur.get(part, {})
             if isinstance(cur, list):
                 deps.extend(_strip_version_spec(d) for d in cur if isinstance(d, str))
+            elif isinstance(cur, dict):
+                # Poetry declares dependencies as {name: version} pairs.
+                deps.extend(k for k in cur if isinstance(k, str))
         return deps
     except Exception:  # noqa: BLE001
         pass
@@ -603,9 +583,22 @@ def _scan_non_python(p: Path) -> dict:
         return {"success": False, "error": f"cannot read file: {exc}"}
 
     issues: list[dict] = []
-    for m in re.finditer(r"([A-Za-z_$][\w$]*)\s*\(", source):
+    # Negative lookbehind skips attribute calls (``obj.method(``), which
+    # cannot be judged statically; keyword set covers language constructs
+    # that look like calls (``new Foo(``, ``require(``, ...).
+    for m in re.finditer(r"(?<![.\w$])([A-Za-z_$][\w$]*)\s*\(", source):
         name = m.group(1)
-        if name in defined or name in {"if", "for", "while", "switch", "catch", "function"}:
+        if name in defined or name in {
+            "if",
+            "for",
+            "while",
+            "switch",
+            "catch",
+            "function",
+            "new",
+            "typeof",
+            "return",
+        }:
             continue
         line = source[: m.start()].count("\n") + 1
         issues.append({"type": "undefined_call", "name": name, "line": line})
@@ -677,9 +670,6 @@ def scan_file(file_path: str) -> dict:
 def load_package_apis(package_name: str) -> dict:
     """Load (and cache) API signatures for a specific package."""
     count = _dep_kb.load_package(package_name)
-    with _state_lock:
-        global _router
-        _router = None
     return {"success": True, "package": package_name, "api_count": count}
 
 
@@ -987,14 +977,15 @@ def explore_call_graph(symbol_name: str) -> dict:
 
     # Callees: symbols referenced from inside any of *symbol_name*'s definitions.
     # A reference is "inside" when its enclosing context matches the symbol
-    # (by qualified or short name) AND its line falls within the def's span.
-    def_spans = [(line, end) for _p, line, end, _kind in definitions]
+    # (by qualified or short name) AND it lives in the same file AND its line
+    # falls within the def's span (short names can collide across modules).
+    def_spans = [(p, line, end) for p, line, end, _kind in definitions]
     callee_names: set[str] = set()
     for ref_name, refs in graph.references.items():
-        for _rp, rline, _rkind, rcontext in refs:
+        for rp, rline, _rkind, rcontext in refs:
             if rcontext not in self_names:
                 continue
-            if any(start <= rline <= end for start, end in def_spans):
+            if any(fp == rp and start <= rline <= end for fp, start, end in def_spans):
                 callee_names.add(ref_name)
 
     callees: list[dict] = []
@@ -1056,17 +1047,17 @@ def explore_impact(symbol_name: str, max_depth: int = 3) -> dict:
         return found
 
     def _callees(name: str) -> set[str]:
-        """Symbols referenced from inside *name*'s definitions."""
-        spans = [(line, end) for _p, line, end, _kind in graph.definitions.get(name, [])]
+        """Symbols referenced from inside *name*'s definitions (same file)."""
+        spans = [(p, line, end) for p, line, end, _kind in graph.definitions.get(name, [])]
         if not spans:
             return set()
         short = name.split(".")[-1]
         found: set[str] = set()
         for ref_name, refs in graph.references.items():
-            for _rp, rline, _rkind, rcontext in refs:
+            for rp, rline, _rkind, rcontext in refs:
                 if rcontext != name and rcontext != short:
                     continue
-                if any(start <= rline <= end for start, end in spans):
+                if any(fp == rp and start <= rline <= end for fp, start, end in spans):
                     found.add(ref_name)
         return found
 
@@ -1161,10 +1152,13 @@ def affected_files(base: str = "HEAD", head: str | None = None, max_depth: int =
             "propagation": 0,
         }
 
-    # Reverse BFS: who references these symbols, transitively.
+    # Reverse BFS (bounded by max_depth): who references these symbols,
+    # transitively. Depth counts hops from the seed symbols.
     visited: set[str] = set()
     frontier: set[str] = set(seeds)
-    while frontier:
+    depth = 0
+    while frontier and depth < max_depth:
+        depth += 1
         nxt: set[str] = set()
         for name in frontier:
             if name in visited:
@@ -1271,9 +1265,3 @@ def choose_tool(query: str) -> dict:
         "confidence": round(choice.confidence, 3),
         "reason": choice.reason,
     }
-
-
-# alias so server.py can reference the same function under a stable name
-def _healthcheck() -> dict:
-    with _state_lock:
-        return {"status": "ok", "indexed": _project_index is not None}

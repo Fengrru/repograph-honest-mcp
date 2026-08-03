@@ -48,6 +48,7 @@ class ProjectIndex:
     symbols: dict[str, SymbolInfo]
     files: list[str]
     cache_key: str = ""
+    cached: bool = False
 
     def to_sqlite(self, db_path: str | Path) -> None:
         import sqlite3
@@ -213,10 +214,18 @@ def get_project_index(
     force_rebuild: bool = False,
     cache_dir: str | Path | None = None,
 ) -> ProjectIndex:
-    """Return (and cache) the project index for *root*."""
+    """Return (and cache) the project index for *root*.
+
+    ``ProjectIndex.cached`` reports whether the result came from the in-memory
+    or on-disk cache (``False`` when it was rebuilt from source).
+    """
     root = Path(root)
     resolved = root.resolve()
-    cache_dir = Path(cache_dir or os.path.expanduser("~/.cache/honestcode"))
+    cache_dir = Path(
+        cache_dir
+        or os.environ.get("HONESTCODE_INDEX_DIR")
+        or os.path.expanduser("~/.cache/honestcode")
+    )
     cache_dir.mkdir(parents=True, exist_ok=True)
     cache_path = cache_dir / f"{resolved.name}_{_stable_hash(str(resolved))}.json"
 
@@ -234,6 +243,7 @@ def get_project_index(
                     symbols=symbols,
                     files=data.get("files", []),
                     cache_key=data.get("cache_key", ""),
+                    cached=True,
                 )
                 _index_cache[str(resolved)] = idx
                 return idx
@@ -242,6 +252,7 @@ def get_project_index(
 
     extractor = StructureExtractor()
     idx = _index_directory(resolved, extractor)
+    idx.cached = False
 
     try:
         cache_path.write_text(

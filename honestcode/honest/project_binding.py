@@ -134,8 +134,9 @@ def install_mcp_config(
                 payload = json.loads(target.read_text(encoding="utf-8"))
             except (OSError, json.JSONDecodeError):
                 payload = {}
-        # Claude Code stores servers under "mcpServers"; the rest under "servers".
-        key = "mcpServers" if name == "claude" else "servers"
+        # Cursor and Claude Code store servers under "mcpServers";
+        # VS Code uses "servers".
+        key = "mcpServers" if name in ("claude", "cursor") else "servers"
         servers = payload.setdefault(key, {})
         servers["honestcode"] = entry
         if dry_run:
